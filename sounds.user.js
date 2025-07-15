@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -21,17 +21,10 @@
 // ==/UserScript==
 
 (async () => {
-    function injectScript(src) {
-        return new Promise((resolve, reject) => {
-            const s = document.createElement("script");
-            s.src = src;
-            s.async = false;
-            s.onload = resolve;
-            s.onerror = reject;
-            document.head.appendChild(s);
-        });
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
-    await injectScript("https://code.jquery.com/ui/1.12.1/jquery-ui.js");
+    await sleep(1000);
 
     if (!MPP.chat.sendPrivate) {
         MPP.chat.sendPrivate = ({ name, color, message }) => {
@@ -266,10 +259,8 @@
         });
     });
 
-    const topOffset = $(".mpp-hats-button").length ? 84 : 58;
-    const $btn = $(
-        `<button id="soundpack-btn" class="ugly-button top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`
-    );
+    const topOffset = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
+    const $btn = $(`<button id="soundpack-btn" class="top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`);
     $("body").append($btn);
 
     const $modal = $(`
