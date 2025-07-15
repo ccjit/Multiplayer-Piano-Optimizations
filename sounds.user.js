@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -192,11 +192,16 @@
             const now = Date.now();
             if (!this.lastPlayed[src] || now - this.lastPlayed[src] >= this.GAP_MS) {
                 this.lastPlayed[src] = now;
-                const audio = new Audio(src);
+                const bustingParam = `_=${now}`;
+                const separator = src.includes("?") ? "&" : "?";
+                const url = src + separator + bustingParam;
+
+                const audio = new Audio(url);
                 audio.volume = this.volume;
                 audio.play().catch(() => { });
             }
         }
+
 
         _refreshDropdown() {
             const select = document.querySelector("#soundpack-select");
@@ -259,31 +264,31 @@
         });
     });
 
-    const topOffset = $('.mpp-hats-button').length ? 84 : 58;
+    const topOffset = $(".mpp-hats-button").length ? 84 : 58;
     const $btn = $(`<button id="soundpack-btn" class="ugly-button top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`);
     $("body").append($btn);
 
     const $modal = $(`
-        <div id="soundpack-modal" class="dialog" style="height: 240px; margin-top: -120px; display: none;">
-            <h3>MPP Sounds</h3><hr>
-            <p>
-            <label>Select soundpack:
-                <select id="soundpack-select" class="text"></select>
-            </label>
-            </p>
-            <p>
-            <label>Import from JSON:
-                <input type="file" id="soundpack-file" accept=".json"/>
-            </label>
-            </p>
-            <p>
-            <label>Reset Soundpacks:
-                <button id="reset-soundpacks">Reset to default</button>
-            </label>
-            </p>
-            <p><button id="soundpack-submit" class="submit">OK</button></p>
-        </div>
-    `);
+    <div id="soundpack-modal" class="dialog" style="height: 240px; margin-top: -120px; display: none;">
+        <h3>MPP Sounds</h3><hr>
+        <p>
+        <label>Select soundpack:
+            <select id="soundpack-select" class="text"></select>
+        </label>
+        </p>
+        <p>
+        <label>Import from JSON:
+            <input type="file" id="soundpack-file" accept=".json"/>
+        </label>
+        </p>
+        <p>
+        <label>Reset Soundpacks:
+            <button id="reset-soundpacks">Reset to default</button>
+        </label>
+        </p>
+        <p><button id="soundpack-submit" class="submit">OK</button></p>
+    </div>
+`);
     $("#modal #modals").append($modal);
 
     function hideAllModals() {
