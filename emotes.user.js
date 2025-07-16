@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.3
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -102,6 +102,24 @@
         }
 
         _replaceEmotesInElement(element) {
+            const prelim = [];
+            for (const node of Array.from(element.childNodes)) {
+                if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\\n")) {
+                    const parts = node.nodeValue.split("\\n");
+                    parts.forEach((part, i) => {
+                        prelim.push(document.createTextNode(part));
+                        if (i < parts.length - 1) {
+                            prelim.push(document.createElement("br"));
+                        }
+                    });
+                } else {
+                    prelim.push(node);
+                }
+            }
+
+            element.textContent = "";
+            prelim.forEach(n => element.appendChild(n));
+
             for (const child of Array.from(element.childNodes)) {
                 if (child.nodeType === Node.TEXT_NODE) {
                     const text = child.nodeValue;
@@ -111,14 +129,15 @@
                     const frag = document.createDocumentFragment();
                     let lastIndex = 0;
                     let match;
-
                     while ((match = this.tokenRegex.exec(text)) !== null) {
                         const fullMatch = match[0];
                         const token = match[1];
                         const idx = match.index;
 
                         if (idx > lastIndex) {
-                            frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                            frag.appendChild(
+                                document.createTextNode(text.slice(lastIndex, idx))
+                            );
                         }
 
                         const ext = this.emotes[token] || "png";
@@ -130,8 +149,14 @@
                         img.style.height = "0.75rem";
                         img.style.verticalAlign = "middle";
                         img.style.margin = "0 0.1rem";
-                        frag.appendChild(img);
+                        img.style.cursor = "pointer";
+                        img.addEventListener("click", () => {
+                            navigator.clipboard.writeText(fullMatch).catch(err => {
+                                console.error("Failed copying emote token:", err);
+                            });
+                        });
 
+                        frag.appendChild(img);
                         lastIndex = idx + fullMatch.length;
                     }
 
