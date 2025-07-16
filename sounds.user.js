@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -16,15 +16,22 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
-// @downloadURL  https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.user.js
-// @updateURL    https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.user.js
+// @updateURL https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.meta.js
 // ==/UserScript==
 
 (async () => {
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    function injectScript(src) {
+        return new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = src;
+            s.async = false;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
     }
-    await sleep(1000);
+    await injectScript("https://code.jquery.com/ui/1.12.1/jquery-ui.js");
 
     if (!MPP.chat.sendPrivate) {
         MPP.chat.sendPrivate = ({ name, color, message }) => {
@@ -259,8 +266,10 @@
         });
     });
 
-    const topOffset = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
-    const $btn = $(`<button id="soundpack-btn" class="top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`);
+    const topOffset = $(".mpp-hats-button").length ? 84 : 58;
+    const $btn = $(
+        `<button id="soundpack-btn" class="ugly-button top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`
+    );
     $("body").append($btn);
 
     const $modal = $(`
