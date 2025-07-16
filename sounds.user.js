@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.4
+// @version      1.2.5
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -253,11 +253,13 @@
         }
     });
     MPP.client.on("c", () => {
-        MPP.chat.sendPrivate({
-            name: `[MPP Sounds] v${soundManager.version}`,
-            color: "#ffaa00",
-            message: "Sound alerts loaded.",
-        });
+        if (MPP.chat.sendPrivate) {
+            MPP.chat.sendPrivate({
+                name: `[MPP Sounds] v${soundManager.version}`,
+                color: "#ffaa00",
+                message: "Sound alerts loaded.",
+            });
+        }
     });
 
     const topOffset = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
