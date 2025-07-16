@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.3
+// @version      1.1.0
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -27,6 +27,7 @@
 
     await sleep(1000);
     const BASE_URL = "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main";
+    const RGB_PREFIX = "\u0D9E";
 
     class EmotesManager {
         constructor(version, baseUrl) {
@@ -96,12 +97,15 @@
 
         _replaceExistingMessages() {
             const messages = document.querySelectorAll("#chat > ul li .message");
-            messages.forEach(msgEl => {
-                this._replaceEmotesInElement(msgEl);
+            messages.forEach(element => {
+                this._replaceEmotesInElement(element);
+                this._replaceRGBSquaresInElement(element);
             });
         }
 
         _replaceEmotesInElement(element) {
+            if (!element) return;
+
             const prelim = [];
             for (const node of Array.from(element.childNodes)) {
                 if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\\n")) {
@@ -116,55 +120,97 @@
                     prelim.push(node);
                 }
             }
-
             element.textContent = "";
             prelim.forEach(n => element.appendChild(n));
 
-            for (const child of Array.from(element.childNodes)) {
-                if (child.nodeType === Node.TEXT_NODE) {
-                    const text = child.nodeValue;
-                    if (!this.tokenRegex.test(text)) continue;
-                    this.tokenRegex.lastIndex = 0;
+            Array.from(element.childNodes).forEach(child => {
+                if (child.nodeType !== Node.TEXT_NODE) return;
+                const text = child.nodeValue;
+                if (!this.tokenRegex || !this.tokenRegex.test(text)) return;
+                this.tokenRegex.lastIndex = 0;
 
-                    const frag = document.createDocumentFragment();
-                    let lastIndex = 0;
-                    let match;
-                    while ((match = this.tokenRegex.exec(text)) !== null) {
-                        const fullMatch = match[0];
-                        const token = match[1];
-                        const idx = match.index;
+                const frag = document.createDocumentFragment();
+                let lastIndex = 0;
+                let match;
+                while ((match = this.tokenRegex.exec(text)) !== null) {
+                    const full = match[0];
+                    const token = match[1];
+                    const idx = match.index;
 
-                        if (idx > lastIndex) {
-                            frag.appendChild(
-                                document.createTextNode(text.slice(lastIndex, idx))
-                            );
-                        }
+                    if (idx > lastIndex) {
+                        frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                    }
 
-                        const ext = this.emotes[token] || "png";
-                        const url = `${this.baseUrl}/emotes/assets/${token}.${ext}`;
-                        const img = document.createElement("img");
-                        img.src = url;
-                        img.title = fullMatch;
-                        img.alt = fullMatch;
-                        img.style.height = "0.75rem";
-                        img.style.verticalAlign = "middle";
-                        img.style.margin = "0 0.1rem";
-                        img.style.cursor = "pointer";
-                        img.addEventListener("click", () => {
-                            navigator.clipboard.writeText(fullMatch).catch(err => {
-                                console.error("Failed copying emote token:", err);
-                            });
+                    const ext = this.emotes[token] || "png";
+                    const url = `${this.baseUrl}/emotes/assets/${token}.${ext}`;
+                    const img = document.createElement("img");
+                    img.src = url;
+                    img.title = full;
+                    img.alt = full;
+                    img.style.height = "0.75rem";
+                    img.style.verticalAlign = "middle";
+                    img.style.cursor = "pointer";
+                    img.addEventListener("click", () => {
+                        navigator.clipboard.writeText(full).catch(err => {
+                            console.error("Failed copying emote token:", err);
                         });
-
-                        frag.appendChild(img);
-                        lastIndex = idx + fullMatch.length;
-                    }
-
-                    if (lastIndex < text.length) {
-                        frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-                    }
-                    element.replaceChild(frag, child);
+                    });
+                    frag.appendChild(img);
+                    lastIndex = idx + full.length;
                 }
+
+                if (lastIndex < text.length) {
+                    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+                }
+                element.replaceChild(frag, child);
+            });
+        }
+
+        _replaceRGBSquaresInElement(element) {
+            for (const node of Array.from(element.childNodes)) {
+                if (node.nodeType !== Node.TEXT_NODE) continue;
+                const text = node.nodeValue;
+                if (!text.includes(RGB_PREFIX)) continue;
+
+                const frag = document.createDocumentFragment();
+                const rgbRegex = new RegExp(`${RGB_PREFIX}([\uFF00-\uFFFF]{3})`, "g");
+                let lastIndex = 0, match;
+
+                while ((match = rgbRegex.exec(text)) !== null) {
+                    const idx = match.index;
+
+                    if (idx > lastIndex) {
+                        frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                    }
+
+                    const trio = match[1];
+                    const r = trio.charCodeAt(0) & 0xFF;
+                    const g = trio.charCodeAt(1) & 0xFF;
+                    const b = trio.charCodeAt(2) & 0xFF;
+                    const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0");
+
+                    const span = document.createElement("span");
+                    span.style.display = "inline-block";
+                    span.style.width = "0.75rem";
+                    span.style.height = "0.75rem";
+                    span.style.verticalAlign = "middle";
+                    span.style.backgroundColor = `#${hex}`;
+                    span.style.cursor = "pointer";
+
+                    const token = RGB_PREFIX + trio;
+                    span.title = `#${hex}`;
+                    span.addEventListener("click", () => {
+                        navigator.clipboard.writeText(token).catch(err => console.error("Clipboard failed", err));
+                    });
+
+                    frag.appendChild(span);
+                    lastIndex = idx + RGB_PREFIX.length + trio.length;
+                }
+
+                if (lastIndex < text.length) {
+                    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+                }
+                element.replaceChild(frag, node);
             }
         }
     }
