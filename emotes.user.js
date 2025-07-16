@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.1.1
+// @version      1.2.0
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -27,7 +27,8 @@
 
     await sleep(1000);
     const BASE_URL = "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main";
-    const RGB_PREFIX = "\u0D9E";
+    const OLD_RGB_PREFIX = 0x0D9E;
+    const NEW_RGB_PREFIX = 0xF000;
 
     class EmotesManager {
         constructor(version, baseUrl) {
@@ -55,18 +56,14 @@
 
         async _loadEmotes() {
             const res = await fetch(`${this.baseUrl}/emotes/meta.json?_=${Date.now()}`);
-            if (!res.ok) {
-                throw new Error(`Failed to load emote metadata: ${res.status}`);
-            }
+            if (!res.ok) throw new Error(`Failed to load emote metadata: ${res.status}`);
             const data = await res.json();
-            if (typeof data !== "object" || Array.isArray(data)) {
-                throw new Error("Unexpected emote metadata shape");
-            }
+            if (typeof data !== "object" || Array.isArray(data)) throw new Error("Unexpected emote metadata shape");
             this.emotes = data;
         }
 
         _buildTokenRegex() {
-            const tokens = Object.keys(this.emotes).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+            const tokens = Object.keys(this.emotes).map(t => t.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&"));
             tokens.sort((a, b) => b.length - a.length);
             this.tokenRegex = new RegExp(`:(${tokens.join("|")}):`, "g");
         }
@@ -77,142 +74,136 @@
                 console.warn("EmotesManager: chat container not found");
                 return;
             }
-
-            const observer = new MutationObserver(mutations => {
-                for (const m of mutations) {
-                    if (m.type === "childList" && m.addedNodes.length) {
-                        for (const node of m.addedNodes) {
-                            if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "LI") {
-                                this._replaceEmotesInElement(node.querySelector(".message"));
-                            }
+            const observer = new MutationObserver(muts => {
+                muts.forEach(m => {
+                    m.addedNodes.forEach(node => {
+                        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "LI") {
+                            this._replaceEmotesInElement(node.querySelector(".message"));
                         }
-                    }
-                }
+                    });
+                });
             });
-
-            observer.observe(chatList, {
-                childList: true
-            });
+            observer.observe(chatList, { childList: true });
         }
 
         _replaceExistingMessages() {
-            const messages = document.querySelectorAll("#chat > ul li .message");
-            messages.forEach(msgEl => {
-                this._replaceEmotesInElement(msgEl);
-            });
+            document.querySelectorAll("#chat > ul li .message").forEach(el => this._replaceEmotesInElement(el));
         }
 
-        _replaceEmotesInElement(element) {
-            if (!element) return;
+        _replaceEmotesInElement(el) {
+            if (!el) return;
 
-            const prelim = [];
-            for (const node of Array.from(element.childNodes)) {
-                if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\\n")) {
-                    const parts = node.nodeValue.split("\\n");
-                    parts.forEach((part, i) => {
-                        prelim.push(document.createTextNode(part));
-                        if (i < parts.length - 1) {
-                            prelim.push(document.createElement("br"));
-                        }
+            const nodes = [];
+            el.childNodes.forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\n") && !node.nodeValue.includes("\\n")) {
+                    node.nodeValue.split("\n").forEach((seg, i, arr) => {
+                        nodes.push(document.createTextNode(seg));
+                        if (i < arr.length - 1) nodes.push(document.createElement("br"));
                     });
                 } else {
-                    prelim.push(node);
+                    nodes.push(node);
                 }
-            }
-            element.textContent = "";
-            prelim.forEach(n => element.appendChild(n));
+            });
+            el.textContent = "";
+            nodes.forEach(n => el.appendChild(n));
 
-            Array.from(element.childNodes).forEach(child => {
-                if (child.nodeType !== Node.TEXT_NODE) return;
-                const text = child.nodeValue;
-                if (!this.tokenRegex || !this.tokenRegex.test(text)) return;
-                this.tokenRegex.lastIndex = 0;
-
+            el.childNodes.forEach(node => {
+                if (node.nodeType !== Node.TEXT_NODE) return;
+                const text = node.nodeValue;
                 const frag = document.createDocumentFragment();
-                let lastIndex = 0;
-                let match;
-                while ((match = this.tokenRegex.exec(text)) !== null) {
-                    const full = match[0];
-                    const token = match[1];
-                    const idx = match.index;
+                let i = 0;
 
-                    if (idx > lastIndex) {
-                        frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
+                while (i < text.length) {
+                    const cp = text.codePointAt(i);
+
+                    // 0xamogus 0xFFRR 0xFFGG 0xFFBB
+                    if (cp === OLD_RGB_PREFIX && i + 3 < text.length) {
+                        const r = text.codePointAt(i + 1) & 0xFF;
+                        const g = text.codePointAt(i + 2) & 0xFF;
+                        const b = text.codePointAt(i + 3) & 0xFF;
+                        this._appendColor(frag, r, g, b, text);
+                        i += 4;
+                        continue;
                     }
 
-                    const ext = this.emotes[token] || "png";
-                    const url = `${this.baseUrl}/emotes/assets/${token}.${ext}`;
-                    const img = document.createElement("img");
-                    img.src = url;
-                    img.title = full;
-                    img.alt = full;
-                    img.style.height = "0.75rem";
-                    img.style.verticalAlign = "middle";
-                    img.style.cursor = "pointer";
-                    img.addEventListener("click", () => {
-                        navigator.clipboard.writeText(full).catch(err => {
-                            console.error("Failed copying emote token:", err);
-                        });
-                    });
-                    frag.appendChild(img);
-                    lastIndex = idx + full.length;
-                }
+                    // 0xF000 0xERGB [0xErgb]
+                    if (cp === NEW_RGB_PREFIX && i + 1 < text.length) {
+                        const high = text.codePointAt(i + 1);
+                        const rHigh = (high >> 8) & 0xF;
+                        const gHigh = (high >> 4) & 0xF;
+                        const bHigh = high & 0xF;
+                        let r, g, b, len;
+                        if (i + 2 < text.length) {
+                            const low = text.codePointAt(i + 2);
+                            const rLow = (low >> 8) & 0xF;
+                            const gLow = (low >> 4) & 0xF;
+                            const bLow = low & 0xF;
+                            r = (rHigh << 4) | rLow;
+                            g = (gHigh << 4) | gLow;
+                            b = (bHigh << 4) | bLow;
+                            len = 3;
+                        } else {
+                            r = rHigh * 17;
+                            g = gHigh * 17;
+                            b = bHigh * 17;
+                            len = 2;
+                        }
+                        this._appendColor(frag, r, g, b, text);
+                        i += len;
+                        continue;
+                    }
 
-                if (lastIndex < text.length) {
-                    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
+                    // 0xFRGB
+                    if (cp >= 0xF000 && cp <= 0xFFFF) {
+                        const nibble = cp & 0x0FFF;
+                        const r = ((nibble >> 8) & 0xF) * 17;
+                        const g = ((nibble >> 4) & 0xF) * 17;
+                        const b = (nibble & 0xF) * 17;
+                        this._appendColor(frag, r, g, b, text);
+                        i += 1;
+                        continue;
+                    }
+
+                    this.tokenRegex.lastIndex = 0;
+                    const rest = text.slice(i);
+                    const m = this.tokenRegex.exec(rest);
+                    if (m && m.index === 0) {
+                        const token = m[0], key = m[1];
+                        const ext = this.emotes[key] || 'png';
+                        const url = `${this.baseUrl}/emotes/assets/${key}.${ext}`;
+                        const img = document.createElement('img');
+                        img.src = url;
+                        img.title = token;
+                        img.alt = token;
+                        img.style.height = '0.75rem';
+                        img.style.verticalAlign = 'middle';
+                        img.style.cursor = 'pointer';
+                        img.addEventListener('click', () => navigator.clipboard.writeText(token));
+                        frag.appendChild(img);
+                        
+                        i += token.length;
+                        continue;
+                    }
+
+                    frag.appendChild(document.createTextNode(text[i]));
+                    i++;
                 }
-                element.replaceChild(frag, child);
+                node.replaceWith(frag);
             });
-
-            this._replaceRGBSquaresInElement(element);
         }
 
-        _replaceRGBSquaresInElement(element) {
-            for (const node of Array.from(element.childNodes)) {
-                if (node.nodeType !== Node.TEXT_NODE) continue;
-                const text = node.nodeValue;
-                if (!text.includes(RGB_PREFIX)) continue;
-
-                const frag = document.createDocumentFragment();
-                const rgbRegex = new RegExp(`${RGB_PREFIX}([\uFF00-\uFFFF]{3})`, "g");
-                let lastIndex = 0, match;
-
-                while ((match = rgbRegex.exec(text)) !== null) {
-                    const idx = match.index;
-
-                    if (idx > lastIndex) {
-                        frag.appendChild(document.createTextNode(text.slice(lastIndex, idx)));
-                    }
-
-                    const trio = match[1];
-                    const r = trio.charCodeAt(0) & 0xFF;
-                    const g = trio.charCodeAt(1) & 0xFF;
-                    const b = trio.charCodeAt(2) & 0xFF;
-                    const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0");
-
-                    const span = document.createElement("span");
-                    span.style.display = "inline-block";
-                    span.style.width = "0.75rem";
-                    span.style.height = "0.75rem";
-                    span.style.verticalAlign = "middle";
-                    span.style.backgroundColor = `#${hex}`;
-                    span.style.cursor = "pointer";
-
-                    const token = RGB_PREFIX + trio;
-                    span.title = `#${hex}`;
-                    span.addEventListener("click", () => {
-                        navigator.clipboard.writeText(token).catch(err => console.error("Clipboard failed", err));
-                    });
-
-                    frag.appendChild(span);
-                    lastIndex = idx + RGB_PREFIX.length + trio.length;
-                }
-
-                if (lastIndex < text.length) {
-                    frag.appendChild(document.createTextNode(text.slice(lastIndex)));
-                }
-                element.replaceChild(frag, node);
-            }
+        _appendColor(frag, r, g, b, token) {
+            const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0').toUpperCase();
+            const span = document.createElement('span');
+            span.style.display = 'inline-block';
+            span.style.width = '0.75rem';
+            span.style.height = '0.75rem';
+            span.style.verticalAlign = 'middle';
+            span.style.backgroundColor = `#${hex}`;
+            span.style.cursor = 'pointer';
+            span.title = `#${hex}`;
+            span.addEventListener('click', () => navigator.clipboard.writeText(token));
+            frag.appendChild(span);
         }
     }
 
