@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -16,6 +16,8 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
+// @downloadURL  https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.user.js
+// @updateURL    https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.meta.js
 // ==/UserScript==
 
 (async () => {
@@ -123,6 +125,7 @@
                         const url = `${this.baseUrl}/emotes/assets/${token}.${ext}`;
                         const img = document.createElement("img");
                         img.src = url;
+                        img.title = fullMatch;
                         img.style.height = "0.75rem";
                         img.style.verticalAlign = "middle";
                         img.style.margin = "0 0.1rem";
