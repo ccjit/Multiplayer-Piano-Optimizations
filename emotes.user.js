@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.2
+// @version      1.2.3
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -46,11 +46,6 @@
                 this._replaceExistingMessages();
             } catch (err) {
                 console.error("EmotesManager failed:", err);
-                MPP.chat.sendPrivate({
-                    name: `[MPP Emotes] v${this.version}`,
-                    color: "#ff0000",
-                    message: "EmotesManager initialization failed. Check console for details",
-                });
             }
         }
 
@@ -101,10 +96,19 @@
                 let i = 0;
                 const frag = document.createDocumentFragment();
 
+                let buffer = "";
+                function flushBuffer() {
+                    if (buffer) {
+                        frag.appendChild(document.createTextNode(buffer));
+                        buffer = "";
+                    }
+                };
+
                 while (i < seg.length) {
                     const cp = seg.codePointAt(i);
 
                     if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
+                        flushBuffer();
                         const r = seg.codePointAt(i + 1) & 0xFF;
                         const g = seg.codePointAt(i + 2) & 0xFF;
                         const b = seg.codePointAt(i + 3) & 0xFF;
@@ -115,6 +119,7 @@
                     }
 
                     if (cp === NEW_RGB_PREFIX && i + 1 < seg.length) {
+                        flushBuffer();
                         const high = seg.codePointAt(i + 1);
                         const hasLow = (i + 2 < seg.length);
                         let r, g, b, consumed;
@@ -139,6 +144,7 @@
                     }
 
                     if (cp >= NEW_RGB_PREFIX && cp <= 0xFFFF) {
+                        flushBuffer();
                         const nibble = cp & 0x0FFF;
                         const r2 = ((nibble >> 8) & 0xF) * 17;
                         const g2 = ((nibble >> 4) & 0xF) * 17;
@@ -153,6 +159,7 @@
                     const rest = seg.slice(i);
                     const m = this.tokenRegex.exec(rest);
                     if (m && m.index === 0) {
+                        flushBuffer();
                         const token = m[0], key = m[1];
                         const ext = this.emotes[key] || "png";
                         const img = document.createElement("img");
@@ -168,10 +175,12 @@
                         continue;
                     }
 
-                    frag.appendChild(document.createTextNode(seg[i]));
+                    buffer += seg[i];
                     i++;
                 }
 
+                flushBuffer();
+                console.log(frag);
                 el.appendChild(frag);
                 if (segIdx < segments.length - 1) {
                     el.appendChild(document.createElement("br"));
