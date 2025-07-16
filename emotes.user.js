@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.1.0
+// @version      1.1.1
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -97,9 +97,8 @@
 
         _replaceExistingMessages() {
             const messages = document.querySelectorAll("#chat > ul li .message");
-            messages.forEach(element => {
-                this._replaceEmotesInElement(element);
-                this._replaceRGBSquaresInElement(element);
+            messages.forEach(msgEl => {
+                this._replaceEmotesInElement(msgEl);
             });
         }
 
@@ -164,6 +163,8 @@
                 }
                 element.replaceChild(frag, child);
             });
+
+            this._replaceRGBSquaresInElement(element);
         }
 
         _replaceRGBSquaresInElement(element) {
