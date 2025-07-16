@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -29,6 +29,7 @@
     const BASE_URL = "https://raw.githubusercontent.com/ZackiBoiz/Multiplayer-Piano-Optimizations/refs/heads/main";
     const OLD_RGB_PREFIX = 0x0D9E;
     const NEW_RGB_PREFIX = 0xF000;
+    const PROPOSAL_RGB_PREFIX = 0xA000;
 
     class EmotesManager {
         constructor(version, baseUrl) {
@@ -143,7 +144,7 @@
                         continue;
                     }
 
-                    if (cp >= NEW_RGB_PREFIX && cp <= 0xFFFF) {
+                    if (cp >= PROPOSAL_RGB_PREFIX && cp <= 0xDFFF) {
                         flushBuffer();
                         const nibble = cp & 0x0FFF;
                         const r2 = ((nibble >> 8) & 0xF) * 17;
@@ -180,7 +181,6 @@
                 }
 
                 flushBuffer();
-                console.log(frag);
                 el.appendChild(frag);
                 if (segIdx < segments.length - 1) {
                     el.appendChild(document.createElement("br"));
