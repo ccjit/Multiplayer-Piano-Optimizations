@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.3
+// @version      1.2.4
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -25,17 +25,6 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
     await sleep(1000);
-
-    if (!MPP.chat.sendPrivate) {
-        MPP.chat.sendPrivate = ({ name, color, message }) => {
-            MPP.chat.receive({
-                m: "a",
-                t: Date.now(),
-                a: message,
-                p: { _id: "usrscr", id: "userscript", name, color },
-            });
-        };
-    }
 
     const builtin = [
         {
@@ -250,6 +239,18 @@
     MPP.client.on("bye", (u) => {
         soundManager.play(soundManager.SOUNDS.LEAVE);
         delete users[u.p];
+    });
+    MPP.client.on("hi", () => {
+        if (!MPP.chat.sendPrivate) {
+            MPP.chat.sendPrivate = ({ name, color, message }) => {
+                MPP.chat.receive({
+                    m: "a",
+                    t: Date.now(),
+                    a: message,
+                    p: { _id: "usrscr", id: "userscript", name, color },
+                });
+            };
+        }
     });
     MPP.client.on("c", () => {
         MPP.chat.sendPrivate({
