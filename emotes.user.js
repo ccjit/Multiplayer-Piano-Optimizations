@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -95,14 +95,18 @@
 
             const nodes = [];
             el.childNodes.forEach(node => {
-                if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\n") && !node.nodeValue.includes("\\n")) {
-                    node.nodeValue.split("\n").forEach((seg, i, arr) => {
-                        nodes.push(document.createTextNode(seg));
-                        if (i < arr.length - 1) nodes.push(document.createElement("br"));
-                    });
-                } else {
-                    nodes.push(node);
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const raw = node.nodeValue;
+                    if (raw.includes("\\n")) {
+                        const parts = raw.split(/(?<!\\)\\n/).map(str => str.replace(/\\\\n/g, "\\n"));
+                        parts.forEach((seg, i) => {
+                            nodes.push(document.createTextNode(seg));
+                            if (i < parts.length - 1) nodes.push(document.createElement("br"));
+                        });
+                        return;
+                    }
                 }
+                nodes.push(node);
             });
             el.textContent = "";
             nodes.forEach(n => el.appendChild(n));
@@ -116,12 +120,13 @@
                 while (i < text.length) {
                     const cp = text.codePointAt(i);
 
-                    // 0xamogus 0xFFRR 0xFFGG 0xFFBB
+                    // 0x0D9E 0xFFRR 0xFFGG 0xFFBB
                     if (cp === OLD_RGB_PREFIX && i + 3 < text.length) {
+                        const raw = text.slice(i, i + 4);
                         const r = text.codePointAt(i + 1) & 0xFF;
                         const g = text.codePointAt(i + 2) & 0xFF;
                         const b = text.codePointAt(i + 3) & 0xFF;
-                        this._appendColor(frag, r, g, b, text);
+                        this._appendColor(frag, r, g, b, raw);
                         i += 4;
                         continue;
                     }
@@ -148,18 +153,20 @@
                             b = bHigh * 17;
                             len = 2;
                         }
-                        this._appendColor(frag, r, g, b, text);
-                        i += len;
+                        const raw = text.slice(i, i + len + 1);
+                        this._appendColor(frag, r, g, b, raw);
+                        i += len + 1;
                         continue;
                     }
 
-                    // 0xFRGB
-                    if (cp >= 0xF000 && cp <= 0xFFFF) {
+                    // 0xF000
+                    if (cp >= NEW_RGB_PREFIX && cp <= 0xFFFF) {
+                        const raw = text.slice(i, i + 1);
                         const nibble = cp & 0x0FFF;
                         const r = ((nibble >> 8) & 0xF) * 17;
                         const g = ((nibble >> 4) & 0xF) * 17;
                         const b = (nibble & 0xF) * 17;
-                        this._appendColor(frag, r, g, b, text);
+                        this._appendColor(frag, r, g, b, raw);
                         i += 1;
                         continue;
                     }
@@ -180,19 +187,18 @@
                         img.style.cursor = 'pointer';
                         img.addEventListener('click', () => navigator.clipboard.writeText(token));
                         frag.appendChild(img);
-                        
+
                         i += token.length;
                         continue;
                     }
 
                     frag.appendChild(document.createTextNode(text[i]));
-                    i++;
-                }
+                    i++;                }
                 node.replaceWith(frag);
             });
         }
 
-        _appendColor(frag, r, g, b, token) {
+        _appendColor(frag, r, g, b, raw) {
             const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, '0').toUpperCase();
             const span = document.createElement('span');
             span.style.display = 'inline-block';
@@ -202,7 +208,8 @@
             span.style.backgroundColor = `#${hex}`;
             span.style.cursor = 'pointer';
             span.title = `#${hex}`;
-            span.addEventListener('click', () => navigator.clipboard.writeText(token));
+
+            span.addEventListener('click', () => navigator.clipboard.writeText(raw));
             frag.appendChild(span);
         }
     }
