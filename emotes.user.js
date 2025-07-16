@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -34,28 +34,21 @@
             this.baseUrl = baseUrl;
             this.emotes = {};
             this.tokenRegex = null;
-
-            this._init();
         }
 
-        async _init() {
+        async init() {
             try {
                 await this._loadEmotes();
                 this._buildTokenRegex();
                 this._initChatObserver();
-
-                MPP.chat.sendPrivate({
-                    name: `[MPP Emotes] v${this.version}`,
-                    color: "#ffaa00",
-                    message: "Emoticons loaded.",
-                });
+                this._replaceExistingMessages();
             } catch (err) {
+                console.error("EmotesManager failed:", err);
                 MPP.chat.sendPrivate({
                     name: `[MPP Emotes] v${this.version}`,
                     color: "#ff0000",
                     message: "EmotesManager initialization failed. Check console for details",
                 });
-                console.error("EmotesManager initialization failed:", err);
             }
         }
 
@@ -101,6 +94,13 @@
             });
         }
 
+        _replaceExistingMessages() {
+            const messages = document.querySelectorAll("#chat > ul li .message");
+            messages.forEach(msgEl => {
+                this._replaceEmotesInElement(msgEl);
+            });
+        }
+
         _replaceEmotesInElement(element) {
             for (const child of Array.from(element.childNodes)) {
                 if (child.nodeType === Node.TEXT_NODE) {
@@ -126,6 +126,7 @@
                         const img = document.createElement("img");
                         img.src = url;
                         img.title = fullMatch;
+                        img.alt = fullMatch;
                         img.style.height = "0.75rem";
                         img.style.verticalAlign = "middle";
                         img.style.margin = "0 0.1rem";
@@ -144,26 +145,5 @@
     }
 
     const emotesManager = new EmotesManager(GM_info.script.version, BASE_URL);
-
-    MPP.client.on("hi", () => {
-        if (!MPP.chat.sendPrivate) {
-            MPP.chat.sendPrivate = ({ name, color, message }) => {
-                MPP.chat.receive({
-                    m: "a",
-                    t: Date.now(),
-                    a: message,
-                    p: { _id: "usrscr", id: "userscript", name, color },
-                });
-            };
-        }
-    });
-    MPP.client.on("c", () => {
-        if (MPP.chat.sendPrivate) {
-            MPP.chat.sendPrivate({
-                name: `[MPP Emotes] v${emotesManager.version}`,
-                color: "#ffaa00",
-                message: "Ready to catch emotes.",
-            });
-        }
-    });
+    emotesManager.init();
 })();
