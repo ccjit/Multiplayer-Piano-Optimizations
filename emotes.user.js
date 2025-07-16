@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.1
+// @version      1.2.2
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -93,108 +93,89 @@
         _replaceEmotesInElement(el) {
             if (!el) return;
 
-            const nodes = [];
-            el.childNodes.forEach(node => {
-                if (node.nodeType === Node.TEXT_NODE) {
-                    const raw = node.nodeValue;
-                    if (raw.includes("\\n")) {
-                        const parts = raw.split(/(?<!\\)\\n/).map(str => str.replace(/\\\\n/g, "\\n"));
-                        parts.forEach((seg, i) => {
-                            nodes.push(document.createTextNode(seg));
-                            if (i < parts.length - 1) nodes.push(document.createElement("br"));
-                        });
-                        return;
-                    }
-                }
-                nodes.push(node);
-            });
+            const rawText = el.textContent;
+            const segments = rawText.split(/(?<!\\)\\n/).map(s => s.replace(/\\\\n/g, "\\n"));
             el.textContent = "";
-            nodes.forEach(n => el.appendChild(n));
 
-            el.childNodes.forEach(node => {
-                if (node.nodeType !== Node.TEXT_NODE) return;
-                const text = node.nodeValue;
-                const frag = document.createDocumentFragment();
+            segments.forEach((seg, segIdx) => {
                 let i = 0;
+                const frag = document.createDocumentFragment();
 
-                while (i < text.length) {
-                    const cp = text.codePointAt(i);
+                while (i < seg.length) {
+                    const cp = seg.codePointAt(i);
 
-                    // 0x0D9E 0xFFRR 0xFFGG 0xFFBB
-                    if (cp === OLD_RGB_PREFIX && i + 3 < text.length) {
-                        const raw = text.slice(i, i + 4);
-                        const r = text.codePointAt(i + 1) & 0xFF;
-                        const g = text.codePointAt(i + 2) & 0xFF;
-                        const b = text.codePointAt(i + 3) & 0xFF;
+                    if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
+                        const r = seg.codePointAt(i + 1) & 0xFF;
+                        const g = seg.codePointAt(i + 2) & 0xFF;
+                        const b = seg.codePointAt(i + 3) & 0xFF;
+                        const raw = seg.slice(i, i + 4);
                         this._appendColor(frag, r, g, b, raw);
                         i += 4;
                         continue;
                     }
 
-                    // 0xF000 0xERGB [0xErgb]
-                    if (cp === NEW_RGB_PREFIX && i + 1 < text.length) {
-                        const high = text.codePointAt(i + 1);
-                        const rHigh = (high >> 8) & 0xF;
-                        const gHigh = (high >> 4) & 0xF;
-                        const bHigh = high & 0xF;
-                        let r, g, b, len;
-                        if (i + 2 < text.length) {
-                            const low = text.codePointAt(i + 2);
-                            const rLow = (low >> 8) & 0xF;
-                            const gLow = (low >> 4) & 0xF;
-                            const bLow = low & 0xF;
-                            r = (rHigh << 4) | rLow;
-                            g = (gHigh << 4) | gLow;
-                            b = (bHigh << 4) | bLow;
-                            len = 3;
+                    if (cp === NEW_RGB_PREFIX && i + 1 < seg.length) {
+                        const high = seg.codePointAt(i + 1);
+                        const hasLow = (i + 2 < seg.length);
+                        let r, g, b, consumed;
+
+                        if (hasLow) {
+                            const low = seg.codePointAt(i + 2);
+                            r = (((high >> 8) & 0xF) << 4) | ((low >> 8) & 0xF);
+                            g = (((high >> 4) & 0xF) << 4) | ((low >> 4) & 0xF);
+                            b = (((high) & 0xF) << 4) | ((low) & 0xF);
+                            consumed = 3;
                         } else {
-                            r = rHigh * 17;
-                            g = gHigh * 17;
-                            b = bHigh * 17;
-                            len = 2;
+                            r = ((high >> 8) & 0xF) * 17;
+                            g = ((high >> 4) & 0xF) * 17;
+                            b = ((high) & 0xF) * 17;
+                            consumed = 2;
                         }
-                        const raw = text.slice(i, i + len + 1);
+
+                        const raw = seg.slice(i, i + consumed);
                         this._appendColor(frag, r, g, b, raw);
-                        i += len + 1;
+                        i += consumed;
                         continue;
                     }
 
-                    // 0xF000
                     if (cp >= NEW_RGB_PREFIX && cp <= 0xFFFF) {
-                        const raw = text.slice(i, i + 1);
                         const nibble = cp & 0x0FFF;
-                        const r = ((nibble >> 8) & 0xF) * 17;
-                        const g = ((nibble >> 4) & 0xF) * 17;
-                        const b = (nibble & 0xF) * 17;
-                        this._appendColor(frag, r, g, b, raw);
+                        const r2 = ((nibble >> 8) & 0xF) * 17;
+                        const g2 = ((nibble >> 4) & 0xF) * 17;
+                        const b2 = (nibble & 0xF) * 17;
+                        const raw2 = seg.slice(i, i + 1);
+                        this._appendColor(frag, r2, g2, b2, raw2);
                         i += 1;
                         continue;
                     }
 
                     this.tokenRegex.lastIndex = 0;
-                    const rest = text.slice(i);
+                    const rest = seg.slice(i);
                     const m = this.tokenRegex.exec(rest);
                     if (m && m.index === 0) {
                         const token = m[0], key = m[1];
-                        const ext = this.emotes[key] || 'png';
-                        const url = `${this.baseUrl}/emotes/assets/${key}.${ext}`;
-                        const img = document.createElement('img');
-                        img.src = url;
-                        img.title = token;
-                        img.alt = token;
-                        img.style.height = '0.75rem';
-                        img.style.verticalAlign = 'middle';
-                        img.style.cursor = 'pointer';
-                        img.addEventListener('click', () => navigator.clipboard.writeText(token));
+                        const ext = this.emotes[key] || "png";
+                        const img = document.createElement("img");
+                        img.src = `${this.baseUrl}/emotes/assets/${key}.${ext}`;
+                        img.alt = img.title = token;
+                        img.style.height = "0.75rem";
+                        img.style.verticalAlign = "middle";
+                        img.style.cursor = "pointer";
+                        img.addEventListener("click", () => navigator.clipboard.writeText(token));
                         frag.appendChild(img);
 
                         i += token.length;
                         continue;
                     }
 
-                    frag.appendChild(document.createTextNode(text[i]));
-                    i++;                }
-                node.replaceWith(frag);
+                    frag.appendChild(document.createTextNode(seg[i]));
+                    i++;
+                }
+
+                el.appendChild(frag);
+                if (segIdx < segments.length - 1) {
+                    el.appendChild(document.createElement("br"));
+                }
             });
         }
 
