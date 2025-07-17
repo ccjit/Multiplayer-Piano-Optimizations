@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.4
+// @version      1.2.5
 // @description  Display emoticons in chat!
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -89,21 +89,40 @@
         _replaceEmotesInElement(el) {
             if (!el) return;
 
-            const rawText = el.textContent;
+            const walk = (node) => {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    const frag = this._processTextSegment(node.textContent);
+                    node.replaceWith(frag);
+                    return;
+                }
+
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    const childRefs = Array.from(node.childNodes);
+                    for (const child of childRefs) {
+                        walk(child);
+                    }
+                }
+            }
+
+            walk(el);
+        }
+        
+        _processTextSegment(rawText) {
+            const frag = document.createDocumentFragment();
+
             const segments = rawText.split(/(?<!\\)\\n/).map(s => s.replace(/\\\\n/g, "\\n"));
-            el.textContent = "";
 
-            segments.forEach((seg, segIdx) => {
+            for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+                const seg = segments[segIdx];
                 let i = 0;
-                const frag = document.createDocumentFragment();
-
                 let buffer = "";
+
                 function flushBuffer() {
                     if (buffer) {
                         frag.appendChild(document.createTextNode(buffer));
                         buffer = "";
                     }
-                };
+                }
 
                 while (i < seg.length) {
                     const cp = seg.codePointAt(i);
@@ -122,7 +141,7 @@
                     if (cp === NEW_RGB_PREFIX && i + 1 < seg.length) {
                         flushBuffer();
                         const high = seg.codePointAt(i + 1);
-                        const hasLow = (i + 2 < seg.length);
+                        const hasLow = i + 2 < seg.length;
                         let r, g, b, consumed;
 
                         if (hasLow) {
@@ -134,7 +153,7 @@
                         } else {
                             r = ((high >> 8) & 0xF) * 17;
                             g = ((high >> 4) & 0xF) * 17;
-                            b = ((high) & 0xF) * 17;
+                            b = (high & 0xF) * 17;
                             consumed = 2;
                         }
 
@@ -161,8 +180,10 @@
                     const m = this.tokenRegex.exec(rest);
                     if (m && m.index === 0) {
                         flushBuffer();
-                        const token = m[0], key = m[1];
-                        const ext = this.emotes[key] || "png";
+                        const token = m[0],
+                            key = m[1],
+                            ext = this.emotes[key] || "png";
+
                         const img = document.createElement("img");
                         img.src = `${this.baseUrl}/emotes/assets/${key}.${ext}`;
                         img.alt = img.title = token;
@@ -170,8 +191,8 @@
                         img.style.verticalAlign = "middle";
                         img.style.cursor = "pointer";
                         img.addEventListener("click", () => navigator.clipboard.writeText(token));
-                        frag.appendChild(img);
 
+                        frag.appendChild(img);
                         i += token.length;
                         continue;
                     }
@@ -181,11 +202,12 @@
                 }
 
                 flushBuffer();
-                el.appendChild(frag);
                 if (segIdx < segments.length - 1) {
-                    el.appendChild(document.createElement("br"));
+                    frag.appendChild(document.createElement("br"));
                 }
-            });
+            }
+
+            return frag;
         }
 
         _appendColor(frag, r, g, b, raw) {
