@@ -1,7 +1,7 @@
 {
-    "NAME":"Scratch",
-    "AUTHOR":"ccjit",
-    "MENTION":"https://file.garden/aHFDYCLeNBLSceNi/mentioned_MENTION.wav",
-    "JOIN":"https://file.garden/aHFDYCLeNBLSceNi/Connect_JOIN.wav",
-    "LEAVE":"https://file.garden/aHFDYCLeNBLSceNi/Disconnect_LEAVE.wav"
+    "NAME": "Scratch",
+    "AUTHOR": "ccjit",
+    "MENTION": "https://file.garden/aHFDYCLeNBLSceNi/mentioned_MENTION.wav",
+    "JOIN": "https://file.garden/aHFDYCLeNBLSceNi/Connect_JOIN.wav",
+    "LEAVE": "https://file.garden/aHFDYCLeNBLSceNi/Disconnect_LEAVE.wav"
 }
