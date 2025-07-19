@@ -1,9 +1,9 @@
 // ==UserScript==
-// @name         Multiplayer Piano Optimizations
+// @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.5
+// @version      1.2.6
 // @description  Display emoticons and colors in chat!
-// @author       zackiboiz
+// @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
 // @match        *://multiplayerpiano.net/*
 // @match        *://multiplayerpiano.org/*
@@ -187,7 +187,7 @@
             span.style.backgroundColor = `#${hex}`;
             span.style.cursor = "pointer";
             span.title = `#${hex}`;
-            
+
             span.addEventListener("click", () => navigator.clipboard.writeText(raw));
             frag.appendChild(span);
         }
