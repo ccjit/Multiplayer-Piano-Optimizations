@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.8
+// @version      1.3.0
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -96,36 +96,42 @@
 
             this._loadSoundpacks();
 
-            const stored = localStorage.currentSoundpack || defaultName;
-            this.currentSoundpack = this.soundpacks[stored] ? stored : defaultName;
-            this.SOUNDS = this.soundpacks[this.currentSoundpack];
+            const stored = localStorage.currentSoundpack;
+            this.currentSoundpack = (stored && this.soundpacks[stored]) ? stored : "";
+            this.SOUNDS = this.soundpacks[this.currentSoundpack] || {};
             this._loadAssetsForCurrentPack();
         }
 
         _loadSoundpacks() {
             let saved = {};
+            let shouldReset = false;
+
             try {
                 saved = JSON.parse(localStorage.savedSoundpacks) || {};
             } catch {
-                console.warn(
-                    "Invalid savedSoundpacks JSON, reverting to builtin only."
-                );
+                console.warn("Invalid savedSoundpacks JSON. Resetting saved list.");
                 saved = {};
+                shouldReset = true;
+            }
+            this.soundpacks = { ...saved };
+
+            const didInit = localStorage.initializedSoundpacks === "true";
+            if ((!didInit && Object.keys(this.soundpacks).length === 0) || shouldReset) {
+                builtin.forEach(sp => this.saveSoundpack(sp, true));
+                localStorage.initializedSoundpacks = "true";
             }
 
-            this.soundpacks = { ...saved };
-            builtin.forEach((sp) => this.saveSoundpack(sp, true));
             localStorage.savedSoundpacks = JSON.stringify(this.soundpacks);
         }
 
         setCurrentSoundpack(name) {
-            if (!this.soundpacks[name]) {
+            if (name && !this.soundpacks[name]) {
                 console.warn(`Soundpack "${name}" does not exist.`);
                 return;
             }
             this.currentSoundpack = name;
-            this.SOUNDS = this.soundpacks[name];
             localStorage.currentSoundpack = name;
+            this.SOUNDS = this.soundpacks[name] || {};
             this._refreshDropdown();
             this._loadAssetsForCurrentPack();
         }
@@ -137,18 +143,15 @@
                 return;
             }
 
-            for (const [existingName, sp] of Object.entries(this.soundpacks)) {
+            for (const [k, sp] of Object.entries(this.soundpacks)) {
                 if (sp.MENTION === MENTION && sp.JOIN === JOIN && sp.LEAVE === LEAVE) {
-                    if (!loading) alert(`This soundpack is identical to "${existingName}".`);
+                    if (!loading) alert(`This soundpack is identical to "${k}".`);
                     return;
                 }
             }
 
-            let unique = NAME;
-            let counter = 1;
-            while (this.soundpacks[unique]) {
-                unique = `${NAME} (${counter++})`;
-            }
+            let unique = NAME, i = 1;
+            while (this.soundpacks[unique]) unique = `${NAME} (${i++})`;
 
             this.soundpacks[unique] = {
                 NAME: unique,
@@ -159,111 +162,146 @@
             };
             localStorage.savedSoundpacks = JSON.stringify(this.soundpacks);
             if (!loading) alert(`Imported soundpack "${unique}".`);
-            this._refreshDropdown?.();
+            this._refreshDropdown();
+        }
+
+        deleteSoundpack(name) {
+            if (!this.soundpacks[name]) return;
+            const keys = Object.keys(this.soundpacks);
+
+            if (keys.length <= 1) {
+                if (!confirm("This is your last soundpack. Deleting it will leave you with no sounds at all. Are you sure?")) {
+                    return;
+                }
+            }
+
+            delete this.soundpacks[name];
+            localStorage.savedSoundpacks = JSON.stringify(this.soundpacks);
+
+            const remain = Object.keys(this.soundpacks);
+            const next = remain.length ? remain[0] : "";
+            this.setCurrentSoundpack(next);
         }
 
         _loadAssetsForCurrentPack() {
             this.audioCache = {};
             ["MENTION", "JOIN", "LEAVE"].forEach(key => {
-                const baseSrc = this.SOUNDS[key];
-                const timestamp = Date.now();
-                const separator = baseSrc.includes("?") ? "&" : "?";
-                const bustedSrc = `${baseSrc + separator}_=${timestamp}`;
-
-                const audio = new Audio(bustedSrc);
-                audio.preload = "auto";
-                audio.volume = this.volume;
-                this.audioCache[baseSrc] = audio;
+                const base = this.SOUNDS[key];
+                if (!base) return;
+                const sep = base.includes("?") ? "&" : "?";
+                const busted = `${base}${sep}_=${Date.now()}`;
+                const a = new Audio(busted);
+                a.preload = "auto";
+                a.volume = this.volume;
+                this.audioCache[base] = a;
             });
         }
 
         play(src) {
+            if (!src) return;
             const now = Date.now();
             if (!this.lastPlayed[src] || now - this.lastPlayed[src] >= this.GAP_MS) {
                 this.lastPlayed[src] = now;
-                const original = this.audioCache[src];
-                if (original) {
-                    const clone = original.cloneNode();
-                    clone.volume = this.volume;
-                    clone.play().catch(() => { });
+                const orig = this.audioCache[src];
+                if (orig) {
+                    const c = orig.cloneNode();
+                    c.volume = this.volume;
+                    c.play().catch(() => { });
                 } else {
-                    const audio = new Audio(src);
-                    audio.volume = this.volume;
-                    audio.play().catch(() => { });
+                    new Audio(src).play().catch(() => { });
                 }
             }
         }
 
         _refreshDropdown() {
-            const select = document.querySelector("#soundpack-select");
-            if (!select) return;
-            select.innerHTML = "";
-            for (const [key, sp] of Object.entries(this.soundpacks)) {
-                const opt = document.createElement("option");
-                opt.value = key;
-                opt.textContent = `${sp.NAME} [${sp.AUTHOR}]`;
-                if (key === this.currentSoundpack) opt.selected = true;
-                select.appendChild(opt);
+            const sel = document.querySelector("#soundpack-select");
+            if (!sel) return;
+            sel.innerHTML = "";
+
+            const noneOpt = document.createElement("option");
+            noneOpt.value = "";
+            noneOpt.textContent = "No Sounds";
+            if (!this.currentSoundpack) noneOpt.selected = true;
+            sel.appendChild(noneOpt);
+
+            for (const [k, sp] of Object.entries(this.soundpacks)) {
+                const o = document.createElement("option");
+                o.value = k;
+                o.textContent = `${sp.NAME} [${sp.AUTHOR}]`;
+                if (k === this.currentSoundpack) o.selected = true;
+                sel.appendChild(o);
             }
         }
     }
 
     const soundManager = new SoundManager(GM_info.script.version);
-    let replyTo = {};
-    let users = {};
+    let replyTo = {}, users = {};
 
     function onMessage(msg) {
         const sender = msg.p ?? msg.sender;
         replyTo[msg.id] = sender._id;
-
         const me = MPP.client.user._id;
         const mention = msg.a.includes(`@${me}`);
         const replyMention = msg.r && replyTo[msg.r] === me;
 
-        if ((mention || replyMention) && (!document.hasFocus() || MPP.client.getOwnParticipant().afk)) {
+        if ((mention || replyMention) &&
+            (!document.hasFocus() || MPP.client.getOwnParticipant().afk)) {
             soundManager.play(soundManager.SOUNDS.MENTION);
         }
     }
+
     MPP.client.on("a", onMessage);
     MPP.client.on("dm", onMessage);
-    MPP.client.on("ch", (ch) => {
+    MPP.client.on("ch", ch => {
         users = {};
-        ch.ppl.forEach((u) => (users[u._id] = u));
+        ch.ppl.forEach(u => (users[u._id] = u));
     });
-    MPP.client.on("p", (p) => {
-        if (!users[p._id]) {
-            soundManager.play(soundManager.SOUNDS.JOIN);
-        }
+    MPP.client.on("p", p => {
+        if (!users[p._id]) soundManager.play(soundManager.SOUNDS.JOIN);
         users[p._id] = p;
     });
-    MPP.client.on("bye", (u) => {
+    MPP.client.on("bye", u => {
         soundManager.play(soundManager.SOUNDS.LEAVE);
         delete users[u.p];
     });
 
-    const topOffset = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
-    const $btn = $(`<button id="soundpack-btn" class="top-button" style="position: fixed; right: 6px; top: ${topOffset}px; z-index: 100; padding: 5px;">MPP Sounds</button>`);
+    const topOff = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
+    const $btn = $(`
+        <button id="soundpack-btn" class="top-button" 
+            style="position: fixed; right: 6px; top: ${topOff}px; z-index: 100; padding: 5px;">
+            MPP Sounds
+        </button>
+    `);
     $("body").append($btn);
 
     const $modal = $(`
         <div id="soundpack-modal" class="dialog" style="height: 240px; margin-top: -120px; display: none;">
-            <h3>MPP Sounds</h3><hr>
-            <p>
+        <h3>MPP Sounds</h3><hr>
+        <p>
             <label>Select soundpack:
-                <select id="soundpack-select" class="text"></select>
+            <select id="soundpack-select" class="text"></select>
             </label>
-            </p>
-            <p>
+        </p>
+        <p>
             <label>Import from JSON:
-                <input type="file" id="soundpack-file" accept=".json"/>
+            <input type="file" id="soundpack-file" accept=".json"/>
             </label>
-            </p>
-            <p>
+        </p>
+        <p>
+            <label>Delete Soundpack:
+            <button id="delete-soundpack">Delete this soundpack</button>
+            </label>
             <label>Reset Soundpacks:
-                <button id="reset-soundpacks">Reset to default</button>
+            <button id="reset-soundpacks">Reset to default</button>
             </label>
-            </p>
-            <p><button id="soundpack-submit" class="submit">OK</button></p>
+        </p>
+        <p><button id="soundpack-submit" class="submit">OK</button></p>
+        <p>
+            <a href="https://github.com/ZackiBoiz/Multiplayer-Piano-Optimizations/tree/main/soundpacks" target="_blank"
+                style="position: absolute; left: 0;bottom: 0; margin: 10px; font-size: 0.5rem;">
+                Find more soundpacks
+            </a>
+        </p>
         </div>
     `);
     $("#modal #modals").append($modal);
@@ -281,11 +319,12 @@
     }
 
     $btn.on("click", showModal);
+
     $("#soundpack-file").on("change", function () {
-        const file = this.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
+        const f = this.files[0];
+        if (!f) return;
+        const r = new FileReader();
+        r.onload = e => {
             try {
                 const data = JSON.parse(e.target.result);
                 soundManager.saveSoundpack(data);
@@ -295,25 +334,37 @@
                 this.value = "";
             }
         };
-        reader.onerror = () => alert("Failed to read file.");
-        reader.readAsText(file);
+        r.onerror = () => alert("Failed to read file.");
+        r.readAsText(f);
     });
+
     $("#soundpack-submit").on("click", () => {
         const sel = $("#soundpack-select").val();
         soundManager.setCurrentSoundpack(sel);
         hideAllModals();
     });
-    $("#reset-soundpacks").on("click", () => {
-        if (
-            confirm("Are you sure you want to reset your soundpacks?") &&
-            confirm("Are you absolutely sure you want to reset your soundpacks?") &&
-            confirm("ARE YOU TOTALLY ABSOLUTELY 100% SURE? THERE IS NO GOING BACK.")
-        ) {
-            soundManager.soundpacks = {};
-            builtin.forEach((sp) => soundManager.saveSoundpack(sp, true));
-            localStorage.savedSoundpacks = JSON.stringify(soundManager.soundpacks);
-            alert("Successfully reset your soundpacks!");
-            soundManager.setCurrentSoundpack(defaultName);
+
+    $("#delete-soundpack").on("click", () => {
+        if (!confirm("Are you sure you want to delete this soundpack?")) return;
+        const cur = soundManager.currentSoundpack;
+        if (!cur) {
+            alert("No soundpack selected to delete.");
+            return;
         }
+        soundManager.deleteSoundpack(cur);
+    });
+
+    $("#reset-soundpacks").on("click", () => {
+        if (!confirm("Are you sure you want to reset your soundpacks?")) return;
+        if (!confirm("Are you absolutely sure? This will erase all your custom packs.")) return;
+        if (!confirm("ARE YOU TOTALLY ABSOLUTELY 100% SURE? THIS IS NOT REVERSABLE!")) return;
+        localStorage.savedSoundpacks = "{}";
+        localStorage.currentSoundpack = defaultName;
+        localStorage.initializedSoundpacks = "false";
+
+        soundManager._loadSoundpacks();
+        soundManager.setCurrentSoundpack(defaultName);
+
+        alert("Successfully reset your soundpacks!");
     });
 })();
