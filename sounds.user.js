@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.3.0
+// @version      1.3.1
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -145,7 +145,7 @@
 
             for (const [k, sp] of Object.entries(this.soundpacks)) {
                 if (sp.MENTION === MENTION && sp.JOIN === JOIN && sp.LEAVE === LEAVE) {
-                    if (!loading) alert(`This soundpack is identical to "${k}".`);
+                    if (!loading) alert(`Imported soundpack "${NAME}" is identical to soundpack "${k}".`);
                     return;
                 }
             }
@@ -276,32 +276,32 @@
 
     const $modal = $(`
         <div id="soundpack-modal" class="dialog" style="height: 240px; margin-top: -120px; display: none;">
-        <h3>MPP Sounds</h3><hr>
-        <p>
-            <label>Select soundpack:
-            <select id="soundpack-select" class="text"></select>
-            </label>
-        </p>
-        <p>
-            <label>Import from JSON:
-            <input type="file" id="soundpack-file" accept=".json"/>
-            </label>
-        </p>
-        <p>
-            <label>Delete Soundpack:
-            <button id="delete-soundpack">Delete this soundpack</button>
-            </label>
-            <label>Reset Soundpacks:
-            <button id="reset-soundpacks">Reset to default</button>
-            </label>
-        </p>
-        <p><button id="soundpack-submit" class="submit">OK</button></p>
-        <p>
-            <a href="https://github.com/ZackiBoiz/Multiplayer-Piano-Optimizations/tree/main/soundpacks" target="_blank"
-                style="position: absolute; left: 0;bottom: 0; margin: 10px; font-size: 0.5rem;">
-                Find more soundpacks
-            </a>
-        </p>
+            <h3>MPP Sounds</h3><hr>
+            <p>
+                <label>Select soundpack:
+                    <select id="soundpack-select" class="text"></select>
+                </label>
+            </p>
+            <p>
+                <label>Import from JSON:
+                    <input type="file" id="soundpack-file" accept=".json" multiple/>
+                </label>
+            </p>
+            <p>
+                <label>Delete Soundpack:
+                    <button id="delete-soundpack">Delete this soundpack</button>
+                </label>
+                <label>Reset Soundpacks:
+                    <button id="reset-soundpacks">Reset to default</button>
+                </label>
+            </p>
+            <p><button id="soundpack-submit" class="submit">OK</button></p>
+            <p>
+                <a href="https://github.com/ZackiBoiz/Multiplayer-Piano-Optimizations/tree/main/soundpacks" target="_blank"
+                    style="position: absolute; left: 0;bottom: 0; margin: 10px; font-size: 0.5rem;">
+                    Find more soundpacks
+                </a>
+            </p>
         </div>
     `);
     $("#modal #modals").append($modal);
@@ -321,21 +321,26 @@
     $btn.on("click", showModal);
 
     $("#soundpack-file").on("change", function () {
-        const f = this.files[0];
-        if (!f) return;
-        const r = new FileReader();
-        r.onload = e => {
-            try {
-                const data = JSON.parse(e.target.result);
-                soundManager.saveSoundpack(data);
-            } catch {
-                alert("Invalid JSON file.");
-            } finally {
-                this.value = "";
-            }
-        };
-        r.onerror = () => alert("Failed to read file.");
-        r.readAsText(f);
+        const files = Array.from(this.files);
+        if (!files.length) return;
+
+        files.forEach((file) => {
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    soundManager.saveSoundpack(data);
+                } catch (err) {
+                    alert(`Failed to import "${file.name}".`);
+                }
+            };
+            reader.onerror = () => {
+                alert(`Failed to read file "${file.name}".`);
+            };
+            reader.readAsText(file);
+        });
+
+        this.value = "";
     });
 
     $("#soundpack-submit").on("click", () => {
