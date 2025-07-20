@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.6
+// @version      1.2.7
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -34,12 +34,14 @@
             this.version = version;
             this.baseUrl = baseUrl;
             this.emotes = {};
+            this.emoteUrls = {};
             this.tokenRegex = null;
         }
 
         async init() {
             try {
-                await this._loadEmotes();
+                await this._loadEmotesMeta();
+                await this._preloadEmotes();
                 this._buildTokenRegex();
                 this._initChatObserver();
                 this._replaceExistingMessages();
@@ -48,17 +50,37 @@
             }
         }
 
-        async _loadEmotes() {
+        async _loadEmotesMeta() {
             const res = await fetch(`${this.baseUrl}/emotes/meta.json?_=${Date.now()}`);
-            if (!res.ok) throw new Error(`Failed to load emote metadata: ${res.status}`);
+            if (!res.ok) {
+                throw new Error(`Failed to load emote metadata: ${res.status}`);
+            }
             const data = await res.json();
-            if (typeof data !== "object" || Array.isArray(data)) throw new Error("Unexpected emote metadata shape");
+            if (typeof data !== "object" || Array.isArray(data)) {
+                throw new Error("Unexpected emote metadata shape");
+            }
             this.emotes = data;
         }
 
+        async _preloadEmotes() {
+            const entries = Object.entries(this.emotes);
+            await Promise.all(entries.map(async ([key, ext]) => {
+                try {
+                    const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
+                    if (!resp.ok) throw new Error(`Failed to fetch emote ${key}`);
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    this.emoteUrls[key] = url;
+                } catch (e) {
+                    console.warn(`Could not preload emote '${key}':`, e);
+                }
+            }));
+        }
+
         _buildTokenRegex() {
-            const tokens = Object.keys(this.emotes).map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-            tokens.sort((a, b) => b.length - a.length);
+            const tokens = Object.keys(this.emotes)
+                .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+                .sort((a, b) => b.length - a.length);
             this.tokenRegex = new RegExp(`:(${tokens.join("|")}):`, "g");
         }
 
@@ -68,8 +90,8 @@
                 console.warn("EmotesManager: chat container not found");
                 return;
             }
-            const observer = new MutationObserver(muts => {
-                muts.forEach(m => {
+            const observer = new MutationObserver(mutations => {
+                mutations.forEach(m => {
                     m.addedNodes.forEach(node => {
                         if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "LI") {
                             this._replaceEmotesInElement(node.querySelector(".message"));
@@ -107,7 +129,8 @@
 
             for (let segIdx = 0; segIdx < segments.length; segIdx++) {
                 const seg = segments[segIdx];
-                let i = 0, buffer = "";
+                let buffer = "";
+                let i = 0;
 
                 const flushBuffer = () => {
                     if (buffer) {
@@ -121,9 +144,10 @@
 
                     if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
                         flushBuffer();
-                        const r = seg.codePointAt(i + 1) & 0xFF;
-                        const g = seg.codePointAt(i + 2) & 0xFF;
-                        const b = seg.codePointAt(i + 3) & 0xFF;
+                        const rRaw = seg.codePointAt(i + 1);
+                        const gRaw = seg.codePointAt(i + 2);
+                        const bRaw = seg.codePointAt(i + 3);
+                        const r = rRaw & 0xFF, g = gRaw & 0xFF, b = bRaw & 0xFF;
                         const raw = seg.slice(i, i + 4);
                         this._appendColor(frag, r, g, b, raw);
                         i += 4;
@@ -132,11 +156,10 @@
 
                     if (cp >= 0xE000 && cp <= 0xEFFF) {
                         flushBuffer();
-
-                        const nibble = cp & 0x0FFF;
-                        const r = ((nibble >> 8) & 0xF) * 17;
-                        const g = ((nibble >> 4) & 0xF) * 17;
-                        const b = (nibble & 0xF) * 17;
+                        const nib = cp & 0x0FFF;
+                        const r = ((nib >> 8) & 0xF) * 17;
+                        const g = ((nib >> 4) & 0xF) * 17;
+                        const b = (nib & 0xF) * 17;
                         const raw = seg.slice(i, i + 1);
                         this._appendColor(frag, r, g, b, raw);
                         i += 1;
@@ -148,19 +171,19 @@
                     const m = this.tokenRegex.exec(rest);
                     if (m && m.index === 0) {
                         flushBuffer();
-                        const token = m[0];
+                        const fullToken = m[0];
                         const key = m[1];
-                        const ext = this.emotes[key] || "png";
 
                         const img = document.createElement("img");
-                        img.src = `${this.baseUrl}/emotes/assets/${key}.${ext}`;
-                        img.alt = img.title = token;
+                        img.src = this.emoteUrls[key] || "";
+                        img.alt = img.title = fullToken;
                         img.style.height = "0.75rem";
                         img.style.verticalAlign = "middle";
                         img.style.cursor = "pointer";
-                        img.addEventListener("click", () => navigator.clipboard.writeText(token));
+                        img.addEventListener("click", () => navigator.clipboard.writeText(fullToken));
+
                         frag.appendChild(img);
-                        i += token.length;
+                        i += fullToken.length;
                         continue;
                     }
 
@@ -187,7 +210,6 @@
             span.style.backgroundColor = `#${hex}`;
             span.style.cursor = "pointer";
             span.title = `#${hex}`;
-
             span.addEventListener("click", () => navigator.clipboard.writeText(raw));
             frag.appendChild(span);
         }
