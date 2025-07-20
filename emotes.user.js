@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.2.7
+// @version      1.2.8
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -85,22 +85,26 @@
         }
 
         _initChatObserver() {
-            const chatList = document.querySelector("#chat > ul");
-            if (!chatList) {
-                console.warn("EmotesManager: chat container not found");
-                return;
-            }
+            const chatList = document.querySelector('#chat > ul');
+            if (!chatList) return;
             const observer = new MutationObserver(mutations => {
+                observer.disconnect();
                 mutations.forEach(m => {
                     m.addedNodes.forEach(node => {
-                        if (node.nodeType === Node.ELEMENT_NODE && node.tagName === "LI") {
-                            this._replaceEmotesInElement(node.querySelector(".message"));
+                        if (node.nodeType === 1 && node.tagName === 'LI') {
+                            const msgEl = node.querySelector('.message');
+                            this._replaceEmotesInElement(msgEl);
+                            if (chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 30) {
+                                chatList.scrollTop = chatList.scrollHeight;
+                            }
                         }
                     });
                 });
+                observer.observe(chatList, { childList: true });
             });
             observer.observe(chatList, { childList: true });
         }
+
 
         _replaceExistingMessages() {
             document.querySelectorAll("#chat > ul li .message").forEach(el => this._replaceEmotesInElement(el));
@@ -125,7 +129,10 @@
 
         _processTextSegment(rawText) {
             const frag = document.createDocumentFragment();
-            const segments = rawText.split(/(?<!\\)\\n/).map(s => s.replace(/\\\\n/g, "\\n"));
+            const segments = rawText
+                .replace(/((?<!\\)(?:\\\\)*)(?:\\n){2,}/g, '$1\\n')
+                .split(/(?<!\\)(?:\\\\)*\\n/)
+                .map(s => s.replace(/\\\\n/g, '\\n'));
 
             for (let segIdx = 0; segIdx < segments.length; segIdx++) {
                 const seg = segments[segIdx];
