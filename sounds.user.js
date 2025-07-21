@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.3.1
+// @version      1.4.0
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -21,6 +21,48 @@
 // ==/UserScript==
 
 (async () => {
+    const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
+    const match = dl.match(/greasyfork\.org\/scripts\/(\d+)/);
+    if (!match) {
+        return console.warn("Could not find Greasy Fork script ID in downloadURL/updateURL/homepageURL:", dl);
+    }
+    const scriptId = match[1];
+    const localVersion = GM_info.script.version;
+    const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json`;
+
+    fetch(apiUrl, {
+        mode: "cors",
+        headers: {
+            Accept: "application/json"
+        }
+    }).then(r => {
+        if (!r.ok) throw new Error("Failed to fetch Greasy Fork data.");
+        return r.json();
+    }).then(data => {
+        const remoteVersion = data.version;
+        if (compareVersions(localVersion, remoteVersion) < 0) {
+            if (confirm(
+                `A new version of this script is available!\n` +
+                `Local: ${localVersion}\n` +
+                `Latest: ${remoteVersion}\n\n` +
+                `Open Greasy Fork to update?`
+            )) {
+                window.open(`https://greasyfork.org/scripts/${scriptId}`, "_blank");
+            }
+        }
+    }).catch(err => console.error("Update check failed:", err));
+
+    function compareVersions(a, b) {
+        const pa = a.split(".").map(n => parseInt(n, 10) || 0);
+        const pb = b.split(".").map(n => parseInt(n, 10) || 0);
+        const len = Math.max(pa.length, pb.length);
+        for (let i = 0; i < len; i++) {
+            if ((pa[i] || 0) < (pb[i] || 0)) return -1;
+            if ((pa[i] || 0) > (pb[i] || 0)) return 1;
+        }
+        return 0;
+    }
+
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
