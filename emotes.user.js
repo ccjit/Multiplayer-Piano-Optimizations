@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.3.4
+// @version      1.4.0
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -13,11 +13,8 @@
 // @match        *://mpp.8448.space/*
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
-// @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
-// @downloadURL  https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.user.js
-// @updateURL    https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.meta.js
 // ==/UserScript==
 
 (async () => {
@@ -79,6 +76,27 @@
             this.emotes = {};
             this.emoteUrls = {};
             this.tokenRegex = null;
+
+            this.MAX_SUGGESTIONS = 100;
+            this.DROPDOWN_OFFSET_PX = 10;
+
+            this.dropdown = document.createElement("div");
+            this.dropdown.id = "emote-suggestions";
+            Object.assign(this.dropdown.style, {
+                position: "absolute",
+                backgroundColor: "#333",
+                border: "1px solid #555",
+                borderRadius: "8px",
+                boxShadow: "0 4px 6px rgba(0,0,0,0.3)",
+                zIndex: "9999",
+                maxHeight: "200px",
+                overflowY: "auto",
+                display: "none",
+                fontFamily: "Ubuntu, Arial",
+                color: "#ffffff",
+                fontSize: "0.75rem"
+            });
+            document.body.appendChild(this.dropdown);
         }
 
         async init() {
@@ -88,6 +106,7 @@
                 this._buildTokenRegex();
                 this._initChatObserver();
                 this._replaceExistingMessages();
+                this._initSuggestionListeners();
             } catch (err) {
                 console.error("EmotesManager failed:", err);
             }
@@ -106,18 +125,17 @@
         }
 
         async _preloadEmotes() {
-            const entries = Object.entries(this.emotes);
-            await Promise.all(entries.map(async ([key, ext]) => {
-                try {
-                    const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
-                    if (!resp.ok) throw new Error(`Failed to fetch emote ${key}`);
-                    const blob = await resp.blob();
-                    const url = URL.createObjectURL(blob);
-                    this.emoteUrls[key] = url;
-                } catch (e) {
-                    console.warn(`Could not preload emote "${key}":`, e);
-                }
-            }));
+            await Promise.all(
+                Object.entries(this.emotes).map(async ([key, ext]) => {
+                    try {
+                        const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
+                        const blob = await resp.blob();
+                        this.emoteUrls[key] = URL.createObjectURL(blob);
+                    } catch (e) {
+                        console.warn(`Could not preload emote "${key}":`, e);
+                    }
+                })
+            );
         }
 
         _buildTokenRegex() {
@@ -132,22 +150,19 @@
             if (!chatList) return;
             const observer = new MutationObserver(mutations => {
                 observer.disconnect();
-                mutations.forEach(m => {
-                    m.addedNodes.forEach(node => {
-                        if (node.nodeType === 1 && node.tagName === "LI") {
-                            const msgEl = node.querySelector(".message");
-                            this._replaceEmotesInElement(msgEl);
-                            if (chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 30) {
-                                chatList.scrollTop = chatList.scrollHeight;
-                            }
+                mutations.forEach(m => m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1 && node.tagName === "LI") {
+                        const msgEl = node.querySelector(".message");
+                        this._replaceEmotesInElement(msgEl);
+                        if (chatList.scrollHeight - chatList.scrollTop - chatList.clientHeight < 30) {
+                            chatList.scrollTop = chatList.scrollHeight;
                         }
-                    });
-                });
+                    }
+                }));
                 observer.observe(chatList, { childList: true });
             });
             observer.observe(chatList, { childList: true });
         }
-
 
         _replaceExistingMessages() {
             document.querySelectorAll("#chat > ul li .message").forEach(el => this._replaceEmotesInElement(el));
@@ -155,116 +170,193 @@
 
         _replaceEmotesInElement(el) {
             if (!el) return;
-
             const walk = node => {
                 if (node.nodeType === Node.TEXT_NODE) {
                     const frag = this._processTextSegment(node.textContent);
                     node.replaceWith(frag);
-                    return;
-                }
-                if (node.nodeType === Node.ELEMENT_NODE) {
-                    Array.from(node.childNodes).forEach(child => walk(child));
+                } else if (node.nodeType === Node.ELEMENT_NODE) {
+                    Array.from(node.childNodes).forEach(walk);
                 }
             };
-
             walk(el);
         }
 
         _processTextSegment(rawText) {
             const frag = document.createDocumentFragment();
-            const segments = rawText
-                .replace(/((?<!\\)(?:\\\\)*)(?:\\n){2,}/g, "$1\\n")
-                .split(/(?<!\\)(?:\\\\)*\\n/)
-                .map(s => s.replace(/\\\\n/g, "\\n"));
-
-            for (let segIdx = 0; segIdx < segments.length; segIdx++) {
-                const seg = segments[segIdx];
-                let buffer = "";
-                let i = 0;
-
-                const flushBuffer = () => {
-                    if (buffer) {
-                        frag.appendChild(document.createTextNode(buffer));
-                        buffer = "";
-                    }
-                };
-
-                while (i < seg.length) {
-                    const cp = seg.codePointAt(i);
-
-                    if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
-                        flushBuffer();
-                        const rRaw = seg.codePointAt(i + 1);
-                        const gRaw = seg.codePointAt(i + 2);
-                        const bRaw = seg.codePointAt(i + 3);
-                        const r = rRaw & 0xFF, g = gRaw & 0xFF, b = bRaw & 0xFF;
-                        const raw = seg.slice(i, i + 4);
-                        this._appendColor(frag, r, g, b, raw);
-                        i += 4;
-                        continue;
-                    }
-
-                    if (cp >= 0xE000 && cp <= 0xEFFF) {
-                        flushBuffer();
-                        const nib = cp & 0x0FFF;
-                        const r = ((nib >> 8) & 0xF) * 17;
-                        const g = ((nib >> 4) & 0xF) * 17;
-                        const b = (nib & 0xF) * 17;
-                        const raw = seg.slice(i, i + 1);
-                        this._appendColor(frag, r, g, b, raw);
-                        i += 1;
-                        continue;
-                    }
-
-                    this.tokenRegex.lastIndex = 0;
-                    const rest = seg.slice(i);
-                    const m = this.tokenRegex.exec(rest);
-                    if (m && m.index === 0) {
-                        flushBuffer();
-                        const fullToken = m[0];
-                        const key = m[1];
-
-                        const img = document.createElement("img");
-                        img.src = this.emoteUrls[key] || "";
-                        img.alt = img.title = fullToken;
-                        img.style.height = "0.75rem";
-                        img.style.verticalAlign = "middle";
-                        img.style.cursor = "pointer";
-                        img.addEventListener("click", () => navigator.clipboard.writeText(fullToken));
-
-                        frag.appendChild(img);
-                        i += fullToken.length;
-                        continue;
-                    }
-
-                    buffer += seg[i];
-                    i++;
+            let lastIndex = 0, m;
+            while ((m = this.tokenRegex.exec(rawText)) !== null) {
+                const [full, key] = m;
+                if (m.index > lastIndex) {
+                    frag.appendChild(document.createTextNode(rawText.slice(lastIndex, m.index)));
                 }
-
-                flushBuffer();
-                if (segIdx < segments.length - 1) {
-                    frag.appendChild(document.createElement("br"));
-                }
+                const img = document.createElement("img");
+                img.src = this.emoteUrls[key] || "";
+                img.alt = img.title = full;
+                img.style.height = "0.75rem";
+                img.style.verticalAlign = "middle";
+                img.style.cursor = "pointer";
+                img.addEventListener("click", () => navigator.clipboard.writeText(full));
+                frag.appendChild(img);
+                lastIndex = m.index + full.length;
             }
-
+            if (lastIndex < rawText.length) {
+                frag.appendChild(document.createTextNode(rawText.slice(lastIndex)));
+            }
             return frag;
         }
 
-        _appendColor(frag, r, g, b, raw) {
-            const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase();
-            const span = document.createElement("span");
-            span.style.display = "inline-block";
-            span.style.width = "0.75rem";
-            span.style.height = "0.75rem";
-            span.style.verticalAlign = "middle";
-            span.style.backgroundColor = `#${hex}`;
-            span.style.cursor = "pointer";
-            span.title = `#${hex}`;
-            span.addEventListener("click", () => navigator.clipboard.writeText(raw));
-            frag.appendChild(span);
+        _initSuggestionListeners() {
+            const input = document.querySelector("#chat-input");
+            if (!input) return;
+            const dd = this.dropdown;
+            const MAX = this.MAX_SUGGESTIONS;
+            const OFFSET = this.DROPDOWN_OFFSET_PX;
+            const emoteKeys = Object.keys(this.emotes);
+            let selectedIndex = -1;
+
+            const wrapChar = ch => `<strong style="color: #ff007f;">${ch}</strong>`;
+
+            function showSuggestions(q, rect) {
+                const qLow = q.toLowerCase();
+                const buckets = [[], [], [], []];
+                for (const name of emoteKeys) {
+                    const nameLow = name.toLowerCase();
+                    if (nameLow === qLow) {
+                        buckets[0].push(name);
+                    } else if (nameLow.startsWith(qLow)) {
+                        buckets[1].push(name);
+                    } else if (nameLow.includes(qLow)) {
+                        buckets[2].push(name);
+                    } else {
+                        let qi = 0;
+                        for (const ch of nameLow) {
+                            if (qi < qLow.length && ch === qLow[qi]) qi++;
+                        }
+                        if (qi === qLow.length) buckets[3].push(name);
+                    }
+                }
+                for (const arr of buckets) arr.sort((a, b) => a.length - b.length || a.localeCompare(b));
+                const matches = buckets.flat().slice(0, MAX);
+                if (!matches.length) {
+                    dd.style.display = "none";
+                    return;
+                }
+                dd.innerHTML = "";
+                dd.style.display = "block";
+                dd.style.left = rect.left + "px";
+                dd.style.bottom = (window.innerHeight - rect.top + OFFSET) + "px";
+
+                const hdr = document.createElement("div");
+                hdr.innerHTML = `<em>Showing top <strong>${matches.length}</strong> suggestion${matches.length === 1 ? "" : "s"}...</em>`;
+                hdr.style.cssText = "font-size: 10px; color: #cccccc; padding: 6px; position: sticky; top: 0; background: #2c2c2c;";
+                dd.appendChild(hdr);
+
+                matches.forEach((name, idx) => {
+                    const item = document.createElement("div");
+                    item.className = "dropdown-item";
+                    item.style.padding = "6px";
+                    item.style.cursor  = "pointer";
+                    item.dataset.index = idx;
+
+                    const img = document.createElement("img");
+                    img.src = this.emoteUrls[name] || "";
+                    img.alt = img.title = `:${name}:`;
+                    img.style.height = "1rem";
+                    img.style.verticalAlign = "middle";
+                    img.style.marginRight = "4px";
+                    item.appendChild(img);
+
+                    let label = "";
+                    let qi = 0;
+                    for (const ch of name.split("")) {
+                        if (qi < qLow.length && ch.toLowerCase() === qLow[qi]) {
+                            label += wrapChar(ch);
+                            qi++;
+                        } else {
+                            label += ch;
+                        }
+                    }
+                    item.insertAdjacentHTML("beforeend", `:${label}:`);
+
+                    item.addEventListener("mouseenter", () => setSelected(idx));
+                    item.addEventListener("mouseleave", () => setSelected(-1));
+                    item.addEventListener("click", () => select(idx));
+
+                    dd.appendChild(item);
+                });
+
+                selectedIndex = -1;
+            }
+
+            function clearSelection() {
+                dd.querySelectorAll(".dropdown-item.selected").forEach(el => {
+                    el.classList.remove("selected");
+                    el.style.backgroundColor = "#3c3c3c";
+                });
+            }
+            function setSelected(idx) {
+                clearSelection();
+                if (idx >= 0) {
+                    const el = dd.querySelector(`.dropdown-item[data-index="${idx}"]`);
+                    if (el) {
+                        el.classList.add("selected");
+                        el.style.backgroundColor = "#4c4c4c";
+                        el.scrollIntoView({ block: "nearest" });
+                        selectedIndex = idx;
+                    }
+                } else {
+                    selectedIndex = -1;
+                }
+            }
+            function select(idx) {
+                const el = dd.querySelector(`.dropdown-item[data-index="${idx}"]`);
+                if (el) {
+                    const text = `${el.innerText.trim()} `;
+                    input.value = input.value.replace(/(?<!\\):([^:]*)$/, text);
+                }
+                dd.style.display = "none";
+                input.focus();
+            }
+
+            input.addEventListener("input", () => {
+                const val = input.value, caret = input.selectionStart;
+                const before = val.slice(0, caret);
+                const m = before.match(/(?<!\\):([^:]+)$/);
+                if (m) {
+                    showSuggestions.call(this, m[1], input.getBoundingClientRect());
+                } else {
+                    dd.style.display = "none";
+                }
+            });
+
+            input.addEventListener("keydown", e => {
+                if (dd.style.display === "block") {
+                    if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        setSelected((selectedIndex + 1) % dd.querySelectorAll(".dropdown-item").length);
+                    } else if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        const len = dd.querySelectorAll(".dropdown-item").length;
+                        setSelected((selectedIndex - 1 + len) % len);
+                    } else if (e.key === "Tab") {
+                        if (selectedIndex >= 0) {
+                            e.preventDefault();
+                            select(selectedIndex);
+                        }
+                    } else if (e.key === "Escape") {
+                        dd.style.display = "none";
+                    }
+                }
+            });
+
+            document.addEventListener("click", e => {
+                if (!e.target.closest("#chat-input") && !e.target.closest("#emote-suggestions")) {
+                    dd.style.display = "none";
+                }
+            });
         }
     }
 
-    const emotesManager = new EmotesManager(GM_info.script.version, BASE_URL);
-    emotesManager.init();
+    const manager = new EmotesManager(GM_info.script.version, BASE_URL);
+    manager.init();
 })();
