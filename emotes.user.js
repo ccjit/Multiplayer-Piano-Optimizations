@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -84,7 +84,7 @@
             this.dropdown.id = "emote-suggestions";
             Object.assign(this.dropdown.style, {
                 position: "absolute",
-                backgroundColor: "#333",
+                backgroundColor: "#3c3c3c",
                 border: "1px solid #555",
                 borderRadius: "8px",
                 boxShadow: "0 4px 6px rgba(0,0,0,0.3)",
