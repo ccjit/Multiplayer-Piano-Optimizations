@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.3
+// @version      1.4.4
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -13,6 +13,7 @@
 // @match        *://mpp.8448.space/*
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
+// @match        *://mpp.smp-meow.net/*
 // @grant        GM_info
 // @license      MIT
 // ==/UserScript==
