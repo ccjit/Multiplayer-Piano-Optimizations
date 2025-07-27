@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.1
+// @version      1.4.2
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -97,6 +97,14 @@
                 fontSize: "0.75rem"
             });
             document.body.appendChild(this.dropdown);
+
+            const style = document.createElement("style");
+            style.textContent = `
+                #emote-suggestions .dropdown-item:hover {
+                    background-color: #4c4c4c;
+                }
+            `;
+            document.head.appendChild(style);
         }
 
         async init() {
@@ -183,25 +191,80 @@
 
         _processTextSegment(rawText) {
             const frag = document.createDocumentFragment();
-            let lastIndex = 0, m;
-            while ((m = this.tokenRegex.exec(rawText)) !== null) {
-                const [full, key] = m;
-                if (m.index > lastIndex) {
-                    frag.appendChild(document.createTextNode(rawText.slice(lastIndex, m.index)));
+
+            const segments = rawText
+                .replace(/((?<!\\)(?:\\\\)*)(?:\\n){2,}/g, "$1\\n")
+                .split(/(?<!\\)(?:\\\\)*\\n/)
+                .map(s => s.replace(/\\\\n/g, "\\n"));
+
+            for (let segIdx = 0; segIdx < segments.length; segIdx++) {
+                const seg = segments[segIdx];
+                let buffer = "";
+                let i = 0;
+
+                const flushBuffer = () => {
+                    if (buffer) {
+                        frag.appendChild(document.createTextNode(buffer));
+                        buffer = "";
+                    }
+                };
+
+                while (i < seg.length) {
+                    const cp = seg.codePointAt(i);
+
+                    if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
+                        flushBuffer();
+                        const [rRaw, gRaw, bRaw] = [
+                            seg.codePointAt(i + 1),
+                            seg.codePointAt(i + 2),
+                            seg.codePointAt(i + 3)
+                        ];
+                        const [r, g, b] = [rRaw & 0xFF, gRaw & 0xFF, bRaw & 0xFF];
+                        const raw = seg.slice(i, i + 4);
+                        this._appendColor(frag, r, g, b, raw);
+                        i += 4;
+                        continue;
+                    }
+                    if (cp >= 0xE000 && cp <= 0xEFFF) {
+                        flushBuffer();
+                        const nib = cp & 0x0FFF;
+                        const r = ((nib >> 8) & 0xF) * 17;
+                        const g = ((nib >> 4) & 0xF) * 17;
+                        const b = (nib & 0xF) * 17;
+                        const raw = seg.slice(i, i + 1);
+                        this._appendColor(frag, r, g, b, raw);
+                        i += 1;
+                        continue;
+                    }
+
+                    this.tokenRegex.lastIndex = 0;
+                    const rest = seg.slice(i);
+                    const m = this.tokenRegex.exec(rest);
+                    if (m && m.index === 0) {
+                        flushBuffer();
+                        const full = m[0], key = m[1];
+                        const img = document.createElement("img");
+                        img.src = this.emoteUrls[key] || "";
+                        img.alt = img.title = full;
+                        img.style.height = "0.75rem";
+                        img.style.verticalAlign = "middle";
+                        img.style.cursor = "pointer";
+                        img.addEventListener("click", () => navigator.clipboard.writeText(full));
+                        frag.appendChild(img);
+                        i += full.length;
+                        continue;
+                    }
+
+                    buffer += seg[i];
+                    i++;
                 }
-                const img = document.createElement("img");
-                img.src = this.emoteUrls[key] || "";
-                img.alt = img.title = full;
-                img.style.height = "0.75rem";
-                img.style.verticalAlign = "middle";
-                img.style.cursor = "pointer";
-                img.addEventListener("click", () => navigator.clipboard.writeText(full));
-                frag.appendChild(img);
-                lastIndex = m.index + full.length;
+
+                flushBuffer();
+                if (segIdx < segments.length - 1) {
+                    frag.appendChild(document.createElement("br"));
+                }
             }
-            if (lastIndex < rawText.length) {
-                frag.appendChild(document.createTextNode(rawText.slice(lastIndex)));
-            }
+
             return frag;
         }
 
@@ -255,7 +318,7 @@
                     const item = document.createElement("div");
                     item.className = "dropdown-item";
                     item.style.padding = "6px";
-                    item.style.cursor  = "pointer";
+                    item.style.cursor = "pointer";
                     item.dataset.index = idx;
 
                     const img = document.createElement("img");
@@ -277,15 +340,12 @@
                         }
                     }
                     item.insertAdjacentHTML("beforeend", `:${label}:`);
-
-                    item.addEventListener("mouseenter", () => setSelected(idx));
-                    item.addEventListener("mouseleave", () => setSelected(-1));
                     item.addEventListener("click", () => select(idx));
 
                     dd.appendChild(item);
                 });
 
-                selectedIndex = -1;
+                setSelected(0);
             }
 
             function clearSelection() {
@@ -331,10 +391,10 @@
 
             input.addEventListener("keydown", e => {
                 if (dd.style.display === "block") {
-                    if (e.key === "ArrowDown") {
+                    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
                         e.preventDefault();
                         setSelected((selectedIndex + 1) % dd.querySelectorAll(".dropdown-item").length);
-                    } else if (e.key === "ArrowUp") {
+                    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
                         e.preventDefault();
                         const len = dd.querySelectorAll(".dropdown-item").length;
                         setSelected((selectedIndex - 1 + len) % len);
@@ -343,7 +403,7 @@
                             e.preventDefault();
                             select(selectedIndex);
                         }
-                    } else if (e.key === "Escape") {
+                    } else if (e.key === "Escape" || e.key === "Enter") {
                         dd.style.display = "none";
                     }
                 }
