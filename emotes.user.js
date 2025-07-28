@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.4
+// @version      1.4.5
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -250,6 +250,7 @@
                         img.style.height = "0.75rem";
                         img.style.verticalAlign = "middle";
                         img.style.cursor = "pointer";
+                        img.style.imageRendering = "auto";
                         img.addEventListener("click", () => navigator.clipboard.writeText(full));
                         frag.appendChild(img);
                         i += full.length;
@@ -342,6 +343,7 @@
                     img.style.height = "1rem";
                     img.style.verticalAlign = "middle";
                     img.style.marginRight = "4px";
+                    img.style.imageRendering = "auto";
                     item.appendChild(img);
 
                     let label = "";
