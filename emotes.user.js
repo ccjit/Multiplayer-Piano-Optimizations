@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.5
+// @version      1.4.6
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -111,7 +111,6 @@
         async init() {
             try {
                 await this._loadEmotesMeta();
-                await this._preloadEmotes();
                 this._buildTokenRegex();
                 this._initChatObserver();
                 this._replaceExistingMessages();
@@ -123,28 +122,8 @@
 
         async _loadEmotesMeta() {
             const res = await fetch(`${this.baseUrl}/emotes/meta.json?_=${Date.now()}`);
-            if (!res.ok) {
-                throw new Error(`Failed to load emote metadata: ${res.status}`);
-            }
-            const data = await res.json();
-            if (typeof data !== "object" || Array.isArray(data)) {
-                throw new Error("Unexpected emote metadata shape");
-            }
-            this.emotes = data;
-        }
-
-        async _preloadEmotes() {
-            await Promise.all(
-                Object.entries(this.emotes).map(async ([key, ext]) => {
-                    try {
-                        const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
-                        const blob = await resp.blob();
-                        this.emoteUrls[key] = URL.createObjectURL(blob);
-                    } catch (e) {
-                        console.warn(`Could not preload emote "${key}":`, e);
-                    }
-                })
-            );
+            if (!res.ok) throw new Error(`Failed to load emote metadata: ${res.status}`);
+            this.emotes = await res.json();
         }
 
         _buildTokenRegex() {
@@ -152,6 +131,23 @@
                 .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
                 .sort((a, b) => b.length - a.length);
             this.tokenRegex = new RegExp(`:(${tokens.join("|")}):`, "g");
+        }
+
+        async _getEmoteUrl(key) {
+            if (this.emoteUrls[key]) return this.emoteUrls[key];
+            const ext = this.emotes[key];
+
+            try {
+                const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
+                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                this.emoteUrls[key] = url;
+                return url;
+            } catch (e) {
+                console.warn(`Failed to load emote "${key}":`, e);
+                return "";
+            }
         }
 
         _initChatObserver() {
@@ -192,18 +188,13 @@
 
         _processTextSegment(rawText) {
             const frag = document.createDocumentFragment();
-
-            const segments = rawText
-                .replace(/((?<!\\)(?:\\\\)*)(?:\\n){2,}/g, "$1\\n")
-                .split(/(?<!\\)(?:\\\\)*\\n/)
-                .map(s => s.replace(/\\\\n/g, "\\n"));
+            const segments = rawText.split(/(?<!\\)(?:\\\\)*\\n/);
 
             for (let segIdx = 0; segIdx < segments.length; segIdx++) {
                 const seg = segments[segIdx];
-                let buffer = "";
-                let i = 0;
+                let buffer = "", i = 0;
 
-                const flushBuffer = () => {
+                const flush = () => {
                     if (buffer) {
                         frag.appendChild(document.createTextNode(buffer));
                         buffer = "";
@@ -211,10 +202,31 @@
                 };
 
                 while (i < seg.length) {
-                    const cp = seg.codePointAt(i);
+                    const rest = seg.slice(i);
+                    this.tokenRegex.lastIndex = 0;
+                    const m = this.tokenRegex.exec(rest);
+                    if (m && m.index === 0) {
+                        flush();
+                        const full = m[0], key = m[1];
+                        const img = document.createElement("img");
+                        img.alt = img.title = full;
+                        img.style.height = "0.75rem";
+                        img.style.verticalAlign = "middle";
+                        img.style.cursor = "pointer";
+                        img.style.imageRendering = "auto";
 
+                        this._getEmoteUrl(key).then(url => {
+                            img.src = url;
+                        });
+                        img.addEventListener("click", () => navigator.clipboard.writeText(full));
+                        frag.appendChild(img);
+                        i += full.length;
+                        continue;
+                    }
+
+                    const cp = seg.codePointAt(i);
                     if (cp === OLD_RGB_PREFIX && i + 3 < seg.length) {
-                        flushBuffer();
+                        flush();
                         const [rRaw, gRaw, bRaw] = [
                             seg.codePointAt(i + 1),
                             seg.codePointAt(i + 2),
@@ -227,7 +239,7 @@
                         continue;
                     }
                     if (cp >= 0xE000 && cp <= 0xEFFF) {
-                        flushBuffer();
+                        flush();
                         const nib = cp & 0x0FFF;
                         const r = ((nib >> 8) & 0xF) * 17;
                         const g = ((nib >> 4) & 0xF) * 17;
@@ -238,30 +250,10 @@
                         continue;
                     }
 
-                    this.tokenRegex.lastIndex = 0;
-                    const rest = seg.slice(i);
-                    const m = this.tokenRegex.exec(rest);
-                    if (m && m.index === 0) {
-                        flushBuffer();
-                        const full = m[0], key = m[1];
-                        const img = document.createElement("img");
-                        img.src = this.emoteUrls[key] || "";
-                        img.alt = img.title = full;
-                        img.style.height = "0.75rem";
-                        img.style.verticalAlign = "middle";
-                        img.style.cursor = "pointer";
-                        img.style.imageRendering = "auto";
-                        img.addEventListener("click", () => navigator.clipboard.writeText(full));
-                        frag.appendChild(img);
-                        i += full.length;
-                        continue;
-                    }
-
-                    buffer += seg[i];
-                    i++;
+                    buffer += seg[i++];
                 }
 
-                flushBuffer();
+                flush();
                 if (segIdx < segments.length - 1) {
                     frag.appendChild(document.createElement("br"));
                 }
@@ -295,7 +287,7 @@
 
             const wrapChar = ch => `<strong style="color: #ff007f;">${ch}</strong>`;
 
-            function showSuggestions(q, rect) {
+            const showSuggestions = (q, rect) => {
                 const qLow = q.toLowerCase();
                 const buckets = [[], [], [], []];
                 for (const name of emoteKeys) {
@@ -320,10 +312,11 @@
                     dd.style.display = "none";
                     return;
                 }
+
                 dd.innerHTML = "";
                 dd.style.display = "block";
-                dd.style.left = rect.left + "px";
-                dd.style.bottom = (window.innerHeight - rect.top + OFFSET) + "px";
+                dd.style.left = `${rect.left}px`;
+                dd.style.bottom = `${window.innerHeight - rect.top + OFFSET}px`;
 
                 const hdr = document.createElement("div");
                 hdr.innerHTML = `<em>Showing top <strong>${matches.length}</strong> suggestion${matches.length === 1 ? "" : "s"}...</em>`;
@@ -333,17 +326,16 @@
                 matches.forEach((name, idx) => {
                     const item = document.createElement("div");
                     item.className = "dropdown-item";
-                    item.style.padding = "6px";
-                    item.style.cursor = "pointer";
+                    item.style.cssText = "padding: 6px; cursor: pointer;";
                     item.dataset.index = idx;
 
                     const img = document.createElement("img");
-                    img.src = this.emoteUrls[name] || "";
                     img.alt = img.title = `:${name}:`;
-                    img.style.height = "1rem";
-                    img.style.verticalAlign = "middle";
-                    img.style.marginRight = "4px";
-                    img.style.imageRendering = "auto";
+                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
+                    this._getEmoteUrl(name).then(url => {
+                        img.src = url;
+                    });
+
                     item.appendChild(img);
 
                     let label = "";
@@ -357,43 +349,43 @@
                         }
                     }
                     item.insertAdjacentHTML("beforeend", `:${label}:`);
-                    item.addEventListener("click", () => select(idx));
+
+                    item.addEventListener("click", () => {
+                        const text = `${item.innerText.trim()} `;
+                        input.value = input.value.replace(/(?<!\\):([^:]*)$/, text);
+                        dd.style.display = "none";
+                        input.focus();
+                    });
 
                     dd.appendChild(item);
                 });
 
                 setSelected(0);
-            }
+            };
 
-            function clearSelection() {
+            const clearSelection = () => {
                 dd.querySelectorAll(".dropdown-item.selected").forEach(el => {
                     el.classList.remove("selected");
                     el.style.backgroundColor = "#3c3c3c";
                 });
-            }
-            function setSelected(idx) {
+            };
+
+            const setSelected = idx => {
                 clearSelection();
                 if (idx >= 0) {
                     const el = dd.querySelector(`.dropdown-item[data-index="${idx}"]`);
                     if (el) {
                         el.classList.add("selected");
                         el.style.backgroundColor = "#4c4c4c";
-                        el.scrollIntoView({ block: "nearest" });
+                        el.scrollIntoView({
+                            block: "nearest"
+                        });
                         selectedIndex = idx;
                     }
                 } else {
                     selectedIndex = -1;
                 }
-            }
-            function select(idx) {
-                const el = dd.querySelector(`.dropdown-item[data-index="${idx}"]`);
-                if (el) {
-                    const text = `${el.innerText.trim()} `;
-                    input.value = input.value.replace(/(?<!\\):([^:]*)$/, text);
-                }
-                dd.style.display = "none";
-                input.focus();
-            }
+            };
 
             input.addEventListener("input", () => {
                 const val = input.value, caret = input.selectionStart;
@@ -408,17 +400,17 @@
 
             input.addEventListener("keydown", e => {
                 if (dd.style.display === "block") {
+                    const items = dd.querySelectorAll(".dropdown-item");
                     if (e.key === "ArrowDown" || e.key === "ArrowRight") {
                         e.preventDefault();
-                        setSelected((selectedIndex + 1) % dd.querySelectorAll(".dropdown-item").length);
+                        setSelected((selectedIndex + 1) % items.length);
                     } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
                         e.preventDefault();
-                        const len = dd.querySelectorAll(".dropdown-item").length;
-                        setSelected((selectedIndex - 1 + len) % len);
+                        setSelected((selectedIndex - 1 + items.length) % items.length);
                     } else if (e.key === "Tab") {
                         if (selectedIndex >= 0) {
                             e.preventDefault();
-                            select(selectedIndex);
+                            items[selectedIndex].click();
                         }
                     } else if (e.key === "Escape" || e.key === "Enter") {
                         dd.style.display = "none";
