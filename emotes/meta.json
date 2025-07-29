@@ -126,7 +126,7 @@
     "holy": "png",
     "moly": "png",
     "yep": "png",
-    "d": "gif",
+    "d": "avif",
     "ded": "gif",
     "jupijej": "webp",
     "icatn": "webp",
@@ -138,5 +138,7 @@
     "chadyes": "png",
     "chadno": "png",
     "pepelmao": "gif",
-    "peepopog": "gif"
+    "peepopog": "gif",
+    "widevibe": "avif",
+    "grassblock": "avif"
 }
