@@ -111,7 +111,7 @@
     "trolley": "webp",
     "essaying": "webp",
     "cinema": "webp",
-    "byeee": "webp",
+    "byeee": "avif",
     "smhmhing": "webp",
     "burger": "png",
     "burber": "png",
@@ -140,5 +140,13 @@
     "pepelmao": "gif",
     "peepopog": "gif",
     "widevibe": "avif",
-    "grassblock": "avif"
+    "grassblock": "avif",
+    "w": "avif",
+    "pagbounce": "avif",
+    "fire": "avif",
+    "banger": "avif",
+    "lutschmeineeier": "avif",
+    "thisguy": "avif",
+    "bleh": "avif",
+    "jaja": "avif"
 }
