@@ -15,8 +15,12 @@
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
 // @match        *://mpp.smp-meow.net/*
+// @match        *://piano.ourworldofpixels.com/*
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
+// @downloadURL  https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.user.js
+// @updateURL    https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.meta.js
 // ==/UserScript==
 
 (async () => {
@@ -278,7 +282,7 @@
         }
 
         _initSuggestionListeners() {
-            const input = document.querySelector("#chat-input");
+            const input = document.querySelector("#chat > input");
             if (!input) return;
             const dd = this.dropdown;
             const MAX = this.MAX_SUGGESTIONS;

@@ -15,6 +15,7 @@
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
 // @match        *://mpp.smp-meow.net/*
+// @match        *://piano.ourworldofpixels.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
