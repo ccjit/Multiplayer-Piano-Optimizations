@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.5
+// @version      1.4.6
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -16,6 +16,7 @@
 // @match        *://mpp.hyye.xyz/*
 // @match        *://mpp.smp-meow.net/*
 // @match        *://piano.ourworldofpixels.com/*
+// @match        *://mpp.lapishusky.dev/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
