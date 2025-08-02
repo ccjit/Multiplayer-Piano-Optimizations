@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.9
+// @version      1.4.10
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -214,10 +214,7 @@
                         const full = m[0], key = m[1];
                         const img = document.createElement("img");
                         img.alt = img.title = full;
-                        img.style.height = "0.75rem";
-                        img.style.verticalAlign = "middle";
-                        img.style.cursor = "pointer";
-                        img.style.imageRendering = "auto";
+                        img.style.cssText = "height: 0.75rem; vertical-align: middle; cursor: pointer; image-rendering: auto;";
 
                         this._getEmoteUrl(key).then(url => {
                             img.src = url;
@@ -337,7 +334,7 @@
                     item.style.cssText = "padding: 6px; cursor: pointer;";
                     const img = document.createElement("img");
                     img.alt = img.title = `:${name}:`;
-                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px;";
+                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
                     this._getEmoteUrl(name).then(url => img.src = url);
                     item.appendChild(img);
 
