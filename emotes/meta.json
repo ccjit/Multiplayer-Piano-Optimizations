@@ -125,7 +125,7 @@
     "chatting": "webp",
     "holy": "png",
     "moly": "png",
-    "yep": "png",
+    "yep": "avif",
     "d": "avif",
     "ded": "gif",
     "jupijej": "webp",
@@ -165,5 +165,6 @@
     "whar": "avif",
     "iforgor": "avif",
     "irember": "avif",
-    "cry": "avif"
+    "cry": "avif",
+    "monkeysspinningmonkeys": "avif"
 }
