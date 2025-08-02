@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.8
+// @version      1.4.9
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -83,8 +83,6 @@
             this.emotes = {};
             this.emoteUrls = {};
             this.tokenRegex = null;
-
-            this.MAX_SUGGESTIONS = 100;
             this.DROPDOWN_OFFSET_PX = 10;
 
             this.dropdown = document.createElement("div");
@@ -284,9 +282,7 @@
 
         _initSuggestionListeners() {
             const input = document.querySelector("#chat > input");
-            if (!input) return;
             const dd = this.dropdown;
-            const MAX = this.MAX_SUGGESTIONS;
             const OFFSET = this.DROPDOWN_OFFSET_PX;
             const emoteKeys = Object.keys(this.emotes);
             let selectedIndex = -1;
@@ -300,24 +296,29 @@
                     const nameLow = name.toLowerCase();
                     if (nameLow === qLow) {
                         buckets[0].push(name);
-                    } else if (nameLow.startsWith(qLow)) {
+                    } else if (qLow && nameLow.startsWith(qLow)) {
                         buckets[1].push(name);
-                    } else if (nameLow.includes(qLow)) {
+                    } else if (qLow && nameLow.includes(qLow)) {
                         buckets[2].push(name);
-                    } else {
-                        let qi = 0;
-                        for (const ch of nameLow) {
-                            if (qi < qLow.length && ch === qLow[qi]) qi++;
-                        }
-                        if (qi === qLow.length) buckets[3].push(name);
+                    } else if (!qLow || isSubsequence(qLow, nameLow)) {
+                        buckets[3].push(name);
                     }
                 }
-                for (const arr of buckets) arr.sort((a, b) => a.length - b.length || a.localeCompare(b));
-                const matches = buckets.flat().slice(0, MAX);
-                if (!matches.length) {
-                    dd.style.display = "none";
-                    return;
+
+                for (let i = 0; i < buckets.length; i++) {
+                    if (i >= 2 && qLow) {
+                        buckets[i].sort((a, b) => {
+                            const ia = a.toLowerCase().indexOf(qLow[0]);
+                            const ib = b.toLowerCase().indexOf(qLow[0]);
+                            if (ia !== ib) return ia - ib;
+                            return a.length - b.length || a.localeCompare(b);
+                        });
+                    } else {
+                        buckets[i].sort((a, b) => a.length - b.length || a.localeCompare(b));
+                    }
                 }
+                const matches = buckets.flat();
+                if (!matches.length) { dd.style.display = "none"; return; }
 
                 dd.innerHTML = "";
                 dd.style.display = "block";
@@ -332,41 +333,39 @@
                 matches.forEach((name, idx) => {
                     const item = document.createElement("div");
                     item.className = "dropdown-item";
-                    item.style.cssText = "padding: 6px; cursor: pointer;";
                     item.dataset.index = idx;
-
+                    item.style.cssText = "padding: 6px; cursor: pointer;";
                     const img = document.createElement("img");
                     img.alt = img.title = `:${name}:`;
-                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
-                    this._getEmoteUrl(name).then(url => {
-                        img.src = url;
-                    });
-
+                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px;";
+                    this._getEmoteUrl(name).then(url => img.src = url);
                     item.appendChild(img);
 
                     let label = "";
                     let qi = 0;
-                    for (const ch of name.split("")) {
+                    for (const ch of name) {
                         if (qi < qLow.length && ch.toLowerCase() === qLow[qi]) {
                             label += wrapChar(ch);
                             qi++;
-                        } else {
-                            label += ch;
                         }
+                        else label += ch;
                     }
                     item.insertAdjacentHTML("beforeend", `:${label}:`);
-
                     item.addEventListener("click", () => {
-                        const text = `${item.innerText.trim()} `;
-                        input.value = input.value.replace(/(?<!\\):([^:]*)$/, text);
-                        dd.style.display = "none";
-                        input.focus();
+                        input.value = input.value.replace(/(?<!\\):([^:]*)$/, `:${name}: `);
+                        dd.style.display = "none"; input.focus();
                     });
-
                     dd.appendChild(item);
                 });
-
                 setSelected(0);
+            };
+
+            const isSubsequence = (q, name) => {
+                let qi = 0;
+                for (const ch of name) {
+                    if (qi < q.length && ch === q[qi]) qi++;
+                }
+                return qi === q.length;
             };
 
             const clearSelection = () => {
@@ -394,9 +393,10 @@
             };
 
             input.addEventListener("input", () => {
-                const val = input.value, caret = input.selectionStart;
+                const val = input.value;
+                const caret = input.selectionStart;
                 const before = val.slice(0, caret);
-                const m = before.match(/(?<!\\):([^:]+)$/);
+                const m = before.match(/(?<!\\):([^:]*)$/);
                 if (m) {
                     showSuggestions.call(this, m[1], input.getBoundingClientRect());
                 } else {
