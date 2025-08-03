@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.10
+// @version      1.4.11
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -394,11 +394,17 @@
                 const caret = input.selectionStart;
                 const before = val.slice(0, caret);
                 const m = before.match(/(?<!\\):([^:]*)$/);
-                if (m) {
-                    showSuggestions.call(this, m[1], input.getBoundingClientRect());
-                } else {
+
+                if (!m) {
                     dd.style.display = "none";
+                    return;
                 }
+                if (/:[^:]+:$/.test(before)) {
+                    dd.style.display = "none";
+                    return;
+                }
+
+                showSuggestions.call(this, m[1], input.getBoundingClientRect());
             });
 
             input.addEventListener("keydown", e => {
