@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.5.0
+// @version      1.5.1
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -328,33 +328,52 @@
 
     const $modal = $(`
         <div id="soundpack-modal" class="dialog" style="height: 360px; margin-top: -180px; display: none;">
-            <h3>MPP Sounds</h3><hr>
+            <header>
+                <h3>MPP Sounds</h3>
+                <hr>
+            </header>
+            <div>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="vertical-align: top;">
+                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                                <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Select soundpack</legend>
+                                <select id="soundpack-select"></select>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="vertical-align: top;">
+                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                                <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Import from JSON</legend>
+                                <input type="file" id="soundpack-file" accept=".json" multiple>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="vertical-align: top;">
+                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                                <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Manage soundpacks</legend>
+                                <button type="button" id="delete-soundpack">Delete current soundpack</button>
+                                <button type="button" id="reset-soundpacks">Reset all soundpacks</button>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="vertical-align: top;">
+                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                                <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Preview sounds</legend>
+                                <button type="button" id="preview-mention">Mention</button>
+                                <button type="button" id="preview-join">Join</button>
+                                <button type="button" id="preview-leave">Leave</button>
+                            </fieldset>
+                        </td>
+                    </tr>
+                </table>
+            </div>
             <p>
-                <label><b>Select soundpack:</b>
-                    <select id="soundpack-select" class="text"></select>
-                </label>
+                <button id="soundpack-submit" class="submit">OK</button>
             </p>
-            <p>
-                <label><b>Import from JSON:</b>
-                    <input type="file" id="soundpack-file" accept=".json" multiple/>
-                </label>
-            </p>
-            <p>
-                <label><b>Delete Soundpack:</b>
-                    <button id="delete-soundpack">Delete this soundpack</button>
-                </label>
-                <label><b>Reset Soundpacks:</b>
-                    <button id="reset-soundpacks">Reset to default</button>
-                </label>
-            </p>
-            <p>
-                <label><b>Preview sounds:</b><br>
-                    Mention: <button id="preview-mention">Mention</button><br>
-                    Join: <button id="preview-join">Join</button><br>
-                    Leave: <button id="preview-leave">Leave</button>
-                </label>
-            </p>
-            <p><button id="soundpack-submit" class="submit">OK</button></p>
             <p>
                 <a href="https://github.com/ZackiBoiz/Multiplayer-Piano-Optimizations/tree/main/soundpacks" target="_blank"
                     style="position: absolute; left: 0;bottom: 0; margin: 10px; font-size: 0.5rem;">
