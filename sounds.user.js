@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.8
+// @version      1.5.0
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -319,7 +319,7 @@
 
     const topOff = document.getElementsByClassName("mpp-hats-button").length ? 84 : 58;
     const $btn = $(`
-        <button id="soundpack-btn" class="top-button" 
+        <button id="soundpack-btn" class="top-button"
             style="position: fixed; right: 6px; top: ${topOff}px; z-index: 100; padding: 5px;">
             MPP Sounds
         </button>
@@ -327,24 +327,31 @@
     $("body").append($btn);
 
     const $modal = $(`
-        <div id="soundpack-modal" class="dialog" style="height: 240px; margin-top: -120px; display: none;">
+        <div id="soundpack-modal" class="dialog" style="height: 360px; margin-top: -180px; display: none;">
             <h3>MPP Sounds</h3><hr>
             <p>
-                <label>Select soundpack:
+                <label><b>Select soundpack:</b>
                     <select id="soundpack-select" class="text"></select>
                 </label>
             </p>
             <p>
-                <label>Import from JSON:
+                <label><b>Import from JSON:</b>
                     <input type="file" id="soundpack-file" accept=".json" multiple/>
                 </label>
             </p>
             <p>
-                <label>Delete Soundpack:
+                <label><b>Delete Soundpack:</b>
                     <button id="delete-soundpack">Delete this soundpack</button>
                 </label>
-                <label>Reset Soundpacks:
+                <label><b>Reset Soundpacks:</b>
                     <button id="reset-soundpacks">Reset to default</button>
+                </label>
+            </p>
+            <p>
+                <label><b>Preview sounds:</b><br>
+                    Mention: <button id="preview-mention">Mention</button><br>
+                    Join: <button id="preview-join">Join</button><br>
+                    Leave: <button id="preview-leave">Leave</button>
                 </label>
             </p>
             <p><button id="soundpack-submit" class="submit">OK</button></p>
@@ -372,6 +379,20 @@
 
     $btn.on("click", showModal);
 
+    document.getElementById('soundpack-select').addEventListener('change', (event) => {
+        const sel = event.target.value;
+
+        soundManager.setCurrentSoundpack(sel);
+    });
+    $("#preview-mention").on("click", () => {
+        soundManager.play(soundManager.SOUNDS.MENTION)
+    });
+    $("#preview-join").on("click", () => {
+        soundManager.play(soundManager.SOUNDS.JOIN)
+    });
+    $("#preview-leave").on("click", () => {
+        soundManager.play(soundManager.SOUNDS.LEAVE)
+    });
     $("#soundpack-file").on("change", function () {
         const files = Array.from(this.files);
         if (!files.length) return;
