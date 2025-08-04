@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.7
+// @version      1.4.8
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -45,14 +45,16 @@
         }).then(data => {
             const remoteVersion = data.version;
             if (compareVersions(localVersion, remoteVersion) < 0) {
-                if (confirm(
-                    `A new version of this script is available!\n` +
-                    `Local: ${localVersion}\n` +
-                    `Latest: ${remoteVersion}\n\n` +
-                    `Open Greasy Fork to update?`
-                )) {
-                    window.open(`https://greasyfork.org/scripts/${scriptId}`, "_blank");
-                }
+                new MPP.Notification({
+                    "m": "notification",
+                    "duration": 15000,
+                    "title": "Update Available",
+                    "html": "<p>A new version of this script is available!</p>" +
+                        `<p style='margin-top: 10px;'>Script: ${GM_info.script.name}</p>` +
+                        `<p>Local: v${localVersion}</p>` +
+                        `<p>Latest: v${remoteVersion}</p>` +
+                        `<a href='https://greasyfork.org/scripts/${scriptId}' target='_blank' style='position: absolute; right: 0;bottom: 0; margin: 10px; font-size: 0.5rem;'>Open Greasy Fork to update?</a>`
+                })
             }
         }).catch(err => console.error("Update check failed:", err));
     }
