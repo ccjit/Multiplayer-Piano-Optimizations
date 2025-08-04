@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.11
+// @version      1.4.12
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -180,6 +180,8 @@
         _replaceEmotesInElement(el) {
             if (!el) return;
             const walk = node => {
+                if (node.nodeType === Node.ELEMENT_NODE && node.tagName.toLowerCase() === "code") return;
+
                 if (node.nodeType === Node.TEXT_NODE) {
                     const frag = this._processTextSegment(node.textContent);
                     node.replaceWith(frag);
@@ -192,6 +194,7 @@
 
         _processTextSegment(rawText) {
             const frag = document.createDocumentFragment();
+
             const segments = rawText.split(/(?<!\\)(?:\\\\)*\\n/);
 
             for (let segIdx = 0; segIdx < segments.length; segIdx++) {
@@ -206,23 +209,43 @@
                 };
 
                 while (i < seg.length) {
+                    if (seg[i] === "\\" && seg[i + 1] === ":") {
+                        i += 2;
+                        continue;
+                    }
+
                     const rest = seg.slice(i);
                     this.tokenRegex.lastIndex = 0;
                     const m = this.tokenRegex.exec(rest);
-                    if (m && m.index === 0) {
-                        flush();
+                    if (m) {
                         const full = m[0], key = m[1];
-                        const img = document.createElement("img");
-                        img.alt = img.title = full;
-                        img.style.cssText = "height: 0.75rem; vertical-align: middle; cursor: pointer; image-rendering: auto;";
+                        const absIdx = i + m.index;
+                        let k = absIdx - 1, backCount = 0;
+                        while (k >= 0 && seg[k] === "\\") {
+                            backCount++; k--;
+                        }
 
-                        this._getEmoteUrl(key).then(url => {
-                            img.src = url;
-                        });
-                        img.addEventListener("click", () => navigator.clipboard.writeText(full));
-                        frag.appendChild(img);
-                        i += full.length;
-                        continue;
+                        if (backCount % 2 === 1) {
+                            flush();
+                            frag.appendChild(document.createTextNode(full));
+                            i = absIdx + full.length;
+                            continue;
+                        }
+
+                        if (m.index === 0) {
+                            flush();
+                            const img = document.createElement("img");
+                            img.alt = img.title = full;
+                            img.style.cssText = "height: 0.75rem; vertical-align: middle; cursor: pointer; image-rendering: auto;";
+
+                            this._getEmoteUrl(key).then(url => {
+                                img.src = url;
+                            });
+                            img.addEventListener("click", () => navigator.clipboard.writeText(full));
+                            frag.appendChild(img);
+                            i += full.length;
+                            continue;
+                        }
                     }
 
                     const cp = seg.codePointAt(i);
@@ -393,18 +416,18 @@
                 const val = input.value;
                 const caret = input.selectionStart;
                 const before = val.slice(0, caret);
-                const m = before.match(/(?<!\\):([^:]*)$/);
-
+                
+                const m = before.match(/(?<![\\\w]):([^:\s]*)$/);
                 if (!m) {
-                    dd.style.display = "none";
+                    this.dropdown.style.display = "none";
                     return;
                 }
-                if (/:[^:]+:$/.test(before)) {
-                    dd.style.display = "none";
+                if (/:(?:[^:\s]+):$/.test(before)) {
+                    this.dropdown.style.display = "none";
                     return;
                 }
 
-                showSuggestions.call(this, m[1], input.getBoundingClientRect());
+                showSuggestions(m[1], input.getBoundingClientRect());
             });
 
             input.addEventListener("keydown", e => {
