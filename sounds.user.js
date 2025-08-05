@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.5.1
+// @version      1.6.0
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -20,8 +20,8 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
-// @downloadURL  https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.user.js
-// @updateURL    https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.meta.js
+// @downloadURL https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.user.js
+// @updateURL https://update.greasyfork.org/scripts/542502/Multiplayer%20Piano%20Optimizations%20%5BSounds%5D.meta.js
 // ==/UserScript==
 
 (async () => {
@@ -151,6 +151,9 @@
             this._loadAssetsForCurrentPack();
         }
 
+        setVolume(volume) {
+            this.volume = volume
+        }
         _loadSoundpacks() {
             let saved = {};
             let shouldReset = false;
@@ -327,7 +330,7 @@
     $("body").append($btn);
 
     const $modal = $(`
-        <div id="soundpack-modal" class="dialog" style="height: 360px; margin-top: -180px; display: none;">
+        <div id="soundpack-modal" class="dialog" style="height: 360px; margin-top: -180px; width:600px; margin-left:-300px; display: none;">
             <header>
                 <h3>MPP Sounds</h3>
                 <hr>
@@ -336,7 +339,7 @@
                 <table style="width: 100%; border-collapse: collapse;">
                     <tr>
                         <td style="vertical-align: top;">
-                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                            <fieldset style="border: 1px solid #ffffff; width:270px; padding: 0.25em; margin: 0;">
                                 <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Select soundpack</legend>
                                 <select id="soundpack-select"></select>
                             </fieldset>
@@ -344,7 +347,7 @@
                     </tr>
                     <tr>
                         <td style="vertical-align: top;">
-                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                            <fieldset style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;">
                                 <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Import from JSON</legend>
                                 <input type="file" id="soundpack-file" accept=".json" multiple>
                             </fieldset>
@@ -352,20 +355,28 @@
                     </tr>
                     <tr>
                         <td style="vertical-align: top;">
-                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                            <fieldset style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;">
                                 <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Manage soundpacks</legend>
                                 <button type="button" id="delete-soundpack">Delete current soundpack</button>
                                 <button type="button" id="reset-soundpacks">Reset all soundpacks</button>
                             </fieldset>
                         </td>
                     </tr>
-                    <tr>
+                    <tr style="position: relative; left: 300px; top: -320px">
                         <td style="vertical-align: top;">
-                            <fieldset style="border: 1px solid #ffffff; padding: 0.25em; margin: 0;">
+                            <fieldset style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;">
                                 <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Preview sounds</legend>
                                 <button type="button" id="preview-mention">Mention</button>
                                 <button type="button" id="preview-join">Join</button>
                                 <button type="button" id="preview-leave">Leave</button>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    <tr style="position: relative; left: 300px; top: -320px">
+                        <td style="vertical-align: top;">
+                            <fieldset style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;">
+                                <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Volume</legend>
+                                <input type="range" id="soundpack-volume"min="10" max="100" value='100'/>
                             </fieldset>
                         </td>
                     </tr>
@@ -402,6 +413,13 @@
         const sel = event.target.value;
 
         soundManager.setCurrentSoundpack(sel);
+    });
+    document.getElementById('soundpack-volume').addEventListener('change', (event) => {
+        let val = parseInt(event.target.value)
+        val = val / 100;
+        soundManager.setVolume(val)
+        const sounds = ['MENTION', 'JOIN', 'LEAVE']
+        soundManager.play(soundManager.SOUNDS[sounds[Math.floor(Math.random()*sounds.length)]])
     });
     $("#preview-mention").on("click", () => {
         soundManager.play(soundManager.SOUNDS.MENTION)
