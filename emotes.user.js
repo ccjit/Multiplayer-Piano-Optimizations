@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.14
+// @version      1.4.15
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -20,11 +20,10 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
-// @downloadURL https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.user.js
-// @updateURL https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.meta.js
+// @downloadURL  https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.user.js
+// @updateURL    https://update.greasyfork.org/scripts/542677/Multiplayer%20Piano%20Optimizations%20%5BEmotes%5D.meta.js
 // ==/UserScript==
 
-console.log(GM_info.script.name, "v" + GM_info.script.version, "loaded.");
 (async () => {
     const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
     const match = dl.match(/greasyfork\.org\/scripts\/(\d+)/);
@@ -85,6 +84,7 @@ console.log(GM_info.script.name, "v" + GM_info.script.version, "loaded.");
             this.baseUrl = baseUrl;
             this.emotes = {};
             this.emoteUrls = {};
+            this.emotePromises = {};
             this.tokenRegex = null;
             this.DROPDOWN_OFFSET_PX = 10;
 
@@ -142,19 +142,27 @@ console.log(GM_info.script.name, "v" + GM_info.script.version, "loaded.");
 
         async _getEmoteUrl(key) {
             if (this.emoteUrls[key]) return this.emoteUrls[key];
-            const ext = this.emotes[key];
+            if (this.emotePromises[key]) return this.emotePromises[key];
 
-            try {
-                const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                this.emoteUrls[key] = url;
-                return url;
-            } catch (e) {
-                console.warn(`Failed to load emote "${key}":`, e);
-                return "";
-            }
+            const promise = (async () => {
+                const ext = this.emotes[key];
+                try {
+                    const resp = await fetch(`${this.baseUrl}/emotes/assets/${key}.${ext}?_=${Date.now()}`);
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    this.emoteUrls[key] = url;
+                    return url;
+                } catch (e) {
+                    console.warn(`Failed to load emote "${key}":`, e);
+                    return "";
+                } finally {
+                    delete this.emotePromises[key];
+                }
+            })();
+
+            this.emotePromises[key] = promise;
+            return promise;
         }
 
         _initChatObserver() {
