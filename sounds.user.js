@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.7.0
+// @version      1.7.1
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -458,7 +458,7 @@
                         <input type="range" id="vol-${type}" min="0" max="100" value="${cur}" data-type="${type}"
                             style="width: 100%; height: 100%; background: url(/volume2.png) no-repeat; background-position: 50% 50%; box-shadow: none; border: 0;"/>
                     </div>
-                    <div class="vol-label" style="position: relative; right: 60px; bottom: 8px; font-size: 10px; color: #ccc; text-align: right;">
+                    <div class="vol-label" style="position: relative; right: 50px; bottom: 8px; font-size: 10px; color: #ccc; text-align: right;">
                         Volume: <span id="vol-percent-${type}">${cur}</span>%
                     </div>
                 </label>
