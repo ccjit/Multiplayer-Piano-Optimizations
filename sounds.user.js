@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.6.0
+// @version      1.7.0
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -135,7 +135,6 @@
     ];
     const defaultName = builtin[0].NAME;
 
-    if (!localStorage.defaultVolume) localStorage.defaultVolume = "1.0";
     class SoundManager {
         constructor(version) {
             this.version = version;
@@ -159,7 +158,10 @@
             this._loadAssetsForCurrentPack();
             this.soundTypes.forEach(type => {
                 const $i = $(`#vol-${type}`);
-                if ($i.length) $i.val(Math.round(this.volumes[type] * 100));
+                if ($i.length) {
+                    const current = Math.round(this.volumes[type] * 100);
+                    $i.val(current);
+                }
             });
         }
 
@@ -219,7 +221,11 @@
             this._loadVolumesForPack();
             this.soundTypes.forEach(type => {
                 const $i = $(`#vol-${type}`);
-                if ($i.length) $i.val(Math.round(this.volumes[type] * 100));
+                if ($i.length) {
+                    const current = Math.round(this.volumes[type] * 100);
+                    $i.val(current);
+                    $(`#vol-percent-${type}`).text(current);
+                }
             });
 
             this._refreshDropdown();
@@ -369,7 +375,7 @@
     $("body").append($btn);
 
     const $modal = $(`
-        <div id="soundpack-modal" class="dialog" style="height: 400px; margin-top: -200px; width: 600px; margin-left: -300px; display: none;">
+        <div id="soundpack-modal" class="dialog" style="height: 400px; margin-top: -200px; width: 550px; margin-left: -300px; display: none;">
             <header>
                 <h3>MPP Sounds</h3>
                 <hr>
@@ -403,7 +409,7 @@
                     </tr>
                     <tr style="position: relative; left: 300px; top: -247px">
                         <td style="vertical-align: top;">
-                            <fieldset style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;">
+                            <fieldset style="border: 1px solid #ffffff; width:200px; padding: 0.25em; margin: 0;">
                                 <legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Preview sounds</legend>
                                 <button type="button" id="preview-mention">Mention</button>
                                 <button type="button" id="preview-join">Join</button>
@@ -413,7 +419,7 @@
                     </tr>
                     <tr style="position: relative; left: 300px; top: -247px">
                         <td style="vertical-align: top;">
-                            <fieldset id="volume-sliders" style="border: 1px solid #ffffff; width:250px; padding: 0.25em; margin: 0;"></fieldset>
+                            <fieldset id="volume-sliders" style="border: 1px solid #ffffff; width:20px; padding: 0.25em; margin: 0;"></fieldset>
                         </td>
                     </tr>
                 </table>
@@ -440,11 +446,23 @@
         hideAllModals();
         soundManager._refreshDropdown();
 
-        const $vol = $("#volume-sliders").html(`<legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Preview sounds</legend>`);
+        const $vol = $("#volume-sliders").html(`<legend style="font-size: 18px; padding: 0 0.5em; white-space: nowrap;">Adjust volume</legend>`);
         soundManager.soundTypes.forEach(type => {
             const cur = Math.round(soundManager.volumes[type] * 100);
-            $vol.append(`<label for="vol-${type}">${type}</label>`);
-            $vol.append(`<input type="range" id="vol-${type}" min="0" max="100" value="${cur}" data-type="${type}"/>`);
+            $vol.append(`
+                <label>
+                    <div class="vol-label" style="font-size: 20px;">
+                        ${type}
+                    </div>
+                    <div class="vol-slider" style="width: 100px;">
+                        <input type="range" id="vol-${type}" min="0" max="100" value="${cur}" data-type="${type}"
+                            style="width: 100%; height: 100%; background: url(/volume2.png) no-repeat; background-position: 50% 50%; box-shadow: none; border: 0;"/>
+                    </div>
+                    <div class="vol-label" style="position: relative; right: 60px; bottom: 8px; font-size: 10px; color: #ccc; text-align: right;">
+                        Volume: <span id="vol-percent-${type}">${cur}</span>%
+                    </div>
+                </label>
+            `);
         });
         $("#modal").fadeIn(250);
         $modal.show();
@@ -457,9 +475,11 @@
 
         soundManager.setCurrentSoundpack(sel);
     });
-    $(document).on("change", "#volume-sliders input[type=range]", function () {
+    $(document).on("input", "#volume-sliders input[type=range]", function () {
         const type = $(this).data("type");
-        const vol = $(this).val() / 100;
+        const val = $(this).val();
+        const vol = val / 100;
+        $(`#vol-percent-${type}`).text(val);
         soundManager.setVolumeForType(type, vol);
     });
     $("#preview-mention").on("click", () => {
