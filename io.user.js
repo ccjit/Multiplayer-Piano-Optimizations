@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Input/Output]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Saves and persists MIDI input/output options for you
 // @author       zackiboiz
 // @match        *://multiplayerpiano.com/*
@@ -22,6 +22,8 @@
 // @grant        GM_info
 // @license      MIT
 // @run-at       document-start
+// @downloadURL  https://update.greasyfork.org/scripts/547863/Multiplayer%20Piano%20Optimizations%20%5BInputOutput%5D.user.js
+// @updateURL    https://update.greasyfork.org/scripts/547863/Multiplayer%20Piano%20Optimizations%20%5BInputOutput%5D.meta.js
 // ==/UserScript==
 
 (async () => {
