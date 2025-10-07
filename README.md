@@ -10,7 +10,6 @@
   - Works in DMs as well
 - Also found on [Greasy Fork](https://greasyfork.org/en/scripts/542502)
 
-
 ### Emotes
 - Display emotes in the chat
   - Use emote :shortcodes:
