@@ -375,8 +375,13 @@
                         const before = input.value.slice(0, caret);
                         let after = input.value.slice(caret);
 
-                        let insertion = `:${name}:`;
+                        const rightFragMatch = after.match(/^([^:\s]*)/);
+                        const rightFrag = rightFragMatch ? rightFragMatch[1] : "";
+                        if (rightFrag) {
+                            after = after.slice(rightFrag.length);
+                        }
 
+                        let insertion = `:${name}:`;
                         if (after.length > 0 && after[0] === ":") {
                             const next = after[1] || "";
 
@@ -396,11 +401,10 @@
                         }
 
                         const newBefore = before.replace(/(?<![\\\w]):([^:\s]*)$/, insertion);
-                        input.value = newBefore + after;
 
-                        const insertedEndsWithSpace = insertion.endsWith(" ");
+                        input.value = newBefore + after;
                         let newCaretPos = newBefore.length;
-                        if (!insertedEndsWithSpace && after.length > 0 && /\s/.test(after[0])) {
+                        if (!insertion.endsWith(" ") && after.length > 0 && /\s/.test(after[0])) {
                             newCaretPos += 1;
                         }
                         input.setSelectionRange(newCaretPos, newCaretPos);
@@ -449,18 +453,25 @@
                 const val = input.value;
                 const caret = input.selectionStart;
                 const before = val.slice(0, caret);
+                const after = val.slice(caret);
 
-                const m = before.match(/(?<![\\\w]):([^:\s]*)$/);
-                if (!m) {
-                    this.dropdown.style.display = "none";
+                const beforeRe = /(?<![\\\w]):([^:\s]*)$/;
+                const beforeMatch = beforeRe.exec(before);
+                if (!beforeMatch) {
+                    dd.style.display = "none";
                     return;
                 }
+
+                const afterFragMatch = after.match(/^([^:\s]*)/);
+                const afterFrag = afterFragMatch ? afterFragMatch[1] : "";
+                const combinedQuery = beforeMatch[1] + afterFrag;
+
                 if (/:(?:[^:\s]+):$/.test(before)) {
-                    this.dropdown.style.display = "none";
+                    dd.style.display = "none";
                     return;
                 }
 
-                showSuggestions(m[1], input.getBoundingClientRect());
+                showSuggestions(combinedQuery, input.getBoundingClientRect());
             });
 
             input.addEventListener("keydown", e => {
