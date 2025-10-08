@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.18
+// @version      1.4.19
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -371,8 +371,42 @@
                     }
                     item.insertAdjacentHTML("beforeend", `:${label}:`);
                     item.addEventListener("click", () => {
-                        input.value = input.value.replace(/(?<!\\):([^:]*)$/, `:${name}: `);
-                        dd.style.display = "none"; input.focus();
+                        const caret = input.selectionStart ?? input.value.length;
+                        const before = input.value.slice(0, caret);
+                        let after = input.value.slice(caret);
+
+                        let insertion = `:${name}:`;
+
+                        if (after.length > 0 && after[0] === ":") {
+                            const next = after[1] || "";
+
+                            if (next && !/[\s:]/.test(next)) {
+                                insertion += " ";
+                            } else {
+                                after = after.slice(1);
+
+                                if (!(after.length > 0 && /\s/.test(after[0]))) {
+                                    insertion += " ";
+                                }
+                            }
+                        } else {
+                            if (!(after.length > 0 && /\s/.test(after[0]))) {
+                                insertion += " ";
+                            }
+                        }
+
+                        const newBefore = before.replace(/(?<![\\\w]):([^:\s]*)$/, insertion);
+                        input.value = newBefore + after;
+
+                        const insertedEndsWithSpace = insertion.endsWith(" ");
+                        let newCaretPos = newBefore.length;
+                        if (!insertedEndsWithSpace && after.length > 0 && /\s/.test(after[0])) {
+                            newCaretPos += 1;
+                        }
+                        input.setSelectionRange(newCaretPos, newCaretPos);
+
+                        dd.style.display = "none";
+                        input.focus();
                     });
                     dd.appendChild(item);
                 });
@@ -432,10 +466,10 @@
             input.addEventListener("keydown", e => {
                 if (dd.style.display === "block") {
                     const items = dd.querySelectorAll(".dropdown-item");
-                    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+                    if (e.key === "ArrowDown") {
                         e.preventDefault();
                         setSelected((selectedIndex + 1) % items.length);
-                    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+                    } else if (e.key === "ArrowUp") {
                         e.preventDefault();
                         setSelected((selectedIndex - 1 + items.length) % items.length);
                     } else if (e.key === "Tab") {
@@ -443,7 +477,7 @@
                             e.preventDefault();
                             items[selectedIndex].click();
                         }
-                    } else if (e.key === "Escape" || e.key === "Enter") {
+                    } else {
                         dd.style.display = "none";
                     }
                 }
