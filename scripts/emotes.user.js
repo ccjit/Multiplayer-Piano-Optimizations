@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.4.19
+// @version      1.5.0
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -114,6 +114,36 @@
                 }
             `;
             document.head.appendChild(style);
+
+            this.suggestionsObserver = new IntersectionObserver((entries) => {
+                for (const entry of entries) {
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        const name = img.dataset.emote;
+                        if (name) {
+                            this._getEmoteUrl(name).then(url => {
+                                if (url) {
+                                    img.src = url;
+                                }
+                            }).catch(e => {
+                                console.warn(`Failed to load emote "${name}":`, e);
+                            }).finally(() => {
+                                try {
+                                    this.suggestionsObserver.unobserve(img);
+                                } catch (e) { }
+                            });
+                        } else {
+                            try {
+                                this.suggestionsObserver.unobserve(img);
+                            } catch (e) { }
+                        }
+                    }
+                }
+            }, {
+                root: this.dropdown,
+                rootMargin: "100px",
+                threshold: 0.01
+            });
         }
 
         async init() {
@@ -357,7 +387,8 @@
                     const img = document.createElement("img");
                     img.alt = img.title = `:${name}:`;
                     img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
-                    this._getEmoteUrl(name).then(url => img.src = url);
+                    img.dataset.emote = name;
+                    img.src = "";
                     item.appendChild(img);
 
                     let label = "";
@@ -412,6 +443,15 @@
                         dd.style.display = "none";
                         input.focus();
                     });
+
+                    try {
+                        this.suggestionsObserver.observe(img);
+                    } catch (e) {
+                        this._getEmoteUrl(name).then(url => {
+                            if (url) img.src = url;
+                        });
+                    }
+
                     dd.appendChild(item);
                 });
                 setSelected(0);
