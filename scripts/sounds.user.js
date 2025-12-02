@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.7.4
+// @version      1.7.5
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://*.multiplayerpiano.com/*
@@ -48,7 +48,7 @@
     } else {
         const scriptId = match[1];
         const localVersion = GM_info.script.version;
-        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json`;
+        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json?_=${Date.now()}`;
 
         fetch(apiUrl, {
             mode: "cors",

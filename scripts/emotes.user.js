@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.5.2
+// @version      1.5.3
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -48,7 +48,7 @@
     } else {
         const scriptId = match[1];
         const localVersion = GM_info.script.version;
-        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json`;
+        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json?_=${Date.now()}`;
 
         fetch(apiUrl, {
             mode: "cors",

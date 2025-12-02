@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Input/Output]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.3
+// @version      1.0.4
 // @description  Saves and persists MIDI input/output options for you
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -49,7 +49,7 @@
     } else {
         const scriptId = match[1];
         const localVersion = GM_info.script.version;
-        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json`;
+        const apiUrl = `https://greasyfork.org/scripts/${scriptId}.json?_=${Date.now()}`;
 
         fetch(apiUrl, {
             mode: "cors",
