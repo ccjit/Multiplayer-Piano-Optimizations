@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.5.1
+// @version      1.5.2
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -16,10 +16,23 @@
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
 // @match        *://lmpp.hyye.xyz/*
+// @match        *://mpp.hyye.tk/*
 // @match        *://mpp.smp-meow.net/*
 // @match        *://piano.ourworldofpixels.com/*
 // @match        *://mpp.lapishusky.dev/*
 // @match        *://staging-mpp.sad.ovh/*
+// @match        *://mpp.terrium.net/*
+// @match        *://mpp.yourfriend.lv/*
+// @match        *://mpp.l3m0ncao.wtf/*
+// @match        *://beta-mpp.csys64.com/*
+// @match        *://fleetway-mpp.glitch.me/*
+// @match        *://mpp.totalh.net/*
+// @match        *://mpp.meowbin.com/*
+// @match        *://mppfork.netlify.app/*
+// @match        *://better.mppclone.me/*
+// @match        *://*.openmpp.tk/*
+// @match        *://*.mppkinda.com/*
+// @match        *://*.augustberchelmann.com/piano/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
