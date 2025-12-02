@@ -15,6 +15,7 @@
 // @match        *://mpp.8448.space/*
 // @match        *://mpp.autoplayer.xyz/*
 // @match        *://mpp.hyye.xyz/*
+// @match        *://lmpp.hyye.xyz/*
 // @match        *://mpp.smp-meow.net/*
 // @match        *://piano.ourworldofpixels.com/*
 // @match        *://mpp.lapishusky.dev/*
