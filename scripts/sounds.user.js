@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Sounds]
 // @namespace    https://tampermonkey.net/
-// @version      1.7.6
+// @version      1.7.7
 // @description  Play sounds when users join, leave, or mention you in Multiplayer Piano
 // @author       zackiboiz, cheezburger0, ccjit
 // @match        *://*.multiplayerpiano.com/*
@@ -361,7 +361,7 @@
         if (
             (mention || replyMention) &&
             (!document.hasFocus() || MPP.client.getOwnParticipant().afk) &&
-            !(localStorage.chatMutes.split(",") ?? []).includes(sender._id)
+            !(localStorage.chatMutes?.split(",") ?? []).includes(sender._id)
         ) {
             soundManager.playType("MENTION");
         }
