@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -157,6 +157,9 @@
                     top: 50%;
                     transform: translate(-50%, -50%);
                     pointer-events: auto;
+                    z-index: 2;
+                    height: 100%;
+                    width: auto;
                 }
 
                 .emote-stack img.base {
@@ -453,6 +456,7 @@
                                 stack
                             });
                             img.classList.add("overlay");
+
                             return {
                                 img,
                                 name: o.name
