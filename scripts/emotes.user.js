@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.5.4
+// @version      1.6.0
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -102,6 +102,8 @@
             this.emoteUrls = {};
             this.emotePromises = {};
             this.tokenRegex = null;
+            this.overlayRegex = null;
+            this.combinedRegex = null;
             this.DROPDOWN_OFFSET_PX = 10;
 
             this.dropdown = document.createElement("div");
@@ -127,31 +129,57 @@
                 #emote-suggestions .dropdown-item:hover {
                     background-color: #4c4c4c;
                 }
+
+                .emote-stack {
+                    display: inline-flex;
+                    position: relative;
+                    vertical-align: middle;
+                    overflow: visible;
+                    line-height: 0;
+                    height: 0.75rem;
+                    justify-content: center;
+                    align-items: center;
+                }
+
+                .emote-stack img {
+                    image-rendering: auto !important;
+                    cursor: pointer;
+                    height: 0.75rem;
+                    width: auto;
+                    max-width: none;
+                    max-height: none;
+                    display: inline-block;
+                }
+
+                .emote-stack.stacked img.overlay {
+                    position: absolute;
+                    left: 50%;
+                    top: 50%;
+                    transform: translate(-50%, -50%);
+                    pointer-events: auto;
+                }
+
+                .emote-stack img.base {
+                    position: relative;
+                    z-index: 1;
+                    display: block;
+                }
             `;
             document.head.appendChild(style);
 
-            this.suggestionsObserver = new IntersectionObserver((entries) => {
+            this.suggestionsObserver = new IntersectionObserver(entries => {
                 for (const entry of entries) {
                     if (entry.isIntersecting) {
                         const img = entry.target;
                         const name = img.dataset.emote;
                         if (name) {
                             this._getEmoteUrl(name).then(url => {
-                                if (url) {
-                                    img.src = url;
-                                }
-                            }).catch(e => {
-                                console.warn(`Failed to load emote "${name}":`, e);
-                            }).finally(() => {
-                                try {
-                                    this.suggestionsObserver.unobserve(img);
-                                } catch (e) { }
+                                if (url) img.src = url;
                             });
-                        } else {
-                            try {
-                                this.suggestionsObserver.unobserve(img);
-                            } catch (e) { }
                         }
+                        try {
+                            this.suggestionsObserver.unobserve(img);
+                        } catch (e) { }
                     }
                 }
             }, {
@@ -183,7 +211,16 @@
             const tokens = Object.keys(this.emotes)
                 .map(t => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
                 .sort((a, b) => b.length - a.length);
-            this.tokenRegex = new RegExp(`:(${tokens.join("|")}):`, "g");
+
+            if (tokens.length === 0) {
+                this.tokenRegex = this.overlayRegex = this.combinedRegex = null;
+                return;
+            }
+
+            const tokenList = tokens.join("|");
+            this.tokenRegex = new RegExp(`:(${tokenList}):`, "g");
+            this.overlayRegex = new RegExp(`;(${tokenList});`, "g");
+            this.combinedRegex = new RegExp(`:(${tokenList}):|;(${tokenList});`, "g");
         }
 
         async _getEmoteUrl(key) {
@@ -209,6 +246,45 @@
 
             this.emotePromises[key] = promise;
             return promise;
+        }
+
+        _createEmoteImg(token, { isBase = false, overlayClass = false, stack } = {}) {
+            const img = document.createElement("img");
+            img.alt = img.title = (isBase ? `:${token}:` : `;${token};`);
+            img.dataset.emote = token;
+            img.className = (isBase ? "base" : (overlayClass ? "overlay" : ""));
+            img.style.height = "0.75rem";
+            img.style.width = "auto";
+            img.style.maxWidth = "none";
+            img.style.maxHeight = "none";
+            img.addEventListener("click", (e) => {
+                if (stack && stack.title) navigator.clipboard.writeText(stack.title);
+                else navigator.clipboard.writeText(img.title);
+                e.stopPropagation();
+            });
+            img.addEventListener("mouseenter", () => {
+                img.title = stack ? stack.title : img.title;
+            });
+            img.addEventListener("mouseleave", () => {
+                img.title = stack ? stack.title : img.title;
+            });
+
+            return img;
+        }
+
+        _waitForImgs(imgs, timeout = 1200) {
+            return Promise.all(imgs.map(img => new Promise(resolve => {
+                if (img.complete && (img.naturalWidth || img.naturalHeight)) return resolve();
+                const to = setTimeout(resolve, timeout);
+                img.addEventListener("load", () => {
+                    clearTimeout(to);
+                    resolve();
+                }, { once: true });
+                img.addEventListener("error", () => {
+                    clearTimeout(to);
+                    resolve();
+                }, { once: true });
+            })));
         }
 
         _initChatObserver() {
@@ -256,92 +332,227 @@
 
             for (let segIdx = 0; segIdx < segments.length; segIdx++) {
                 const seg = segments[segIdx];
-                let buffer = "", i = 0;
 
-                const flush = () => {
-                    if (buffer) {
-                        frag.appendChild(document.createTextNode(buffer));
-                        buffer = "";
+                if (!this.combinedRegex) {
+                    frag.appendChild(document.createTextNode(seg));
+                    if (segIdx < segments.length - 1) frag.appendChild(document.createElement("br"));
+                    continue;
+                }
+
+                const tokens = [];
+                let lastIndex = 0;
+                this.combinedRegex.lastIndex = 0;
+                let m;
+                while ((m = this.combinedRegex.exec(seg)) !== null) {
+                    const matchIndex = m.index;
+                    // check escaping
+                    let k = matchIndex - 1,
+                        backCount = 0;
+                    while (k >= 0 && seg[k] === "\\") {
+                        backCount++;
+                        k--;
                     }
-                };
-
-                while (i < seg.length) {
-                    if (seg[i] === "\\" && seg[i + 1] === ":") {
-                        i += 2;
+                    if (backCount % 2 === 1) {
+                        const upTo = this.combinedRegex.lastIndex;
+                        if (upTo > lastIndex) tokens.push({
+                            type: "text",
+                            text: seg.slice(lastIndex, upTo)
+                        });
+                        lastIndex = upTo;
                         continue;
                     }
 
-                    const rest = seg.slice(i);
-                    this.tokenRegex.lastIndex = 0;
-                    const m = this.tokenRegex.exec(rest);
-                    if (m) {
-                        const full = m[0], key = m[1];
-                        const absIdx = i + m.index;
-                        let k = absIdx - 1, backCount = 0;
-                        while (k >= 0 && seg[k] === "\\") {
-                            backCount++; k--;
+                    if (matchIndex > lastIndex) tokens.push({
+                        type: "text",
+                        text: seg.slice(lastIndex, matchIndex)
+                    });
+                    if (m[1]) tokens.push({
+                        type: "normal",
+                        name: m[1]
+                    });
+                    else if (m[2]) tokens.push({
+                        type: "overlay",
+                        name: m[2]
+                    });
+                    lastIndex = this.combinedRegex.lastIndex;
+                }
+                if (lastIndex < seg.length) tokens.push({
+                    type: "text",
+                    text: seg.slice(lastIndex)
+                });
+
+                if (!tokens.some(t => t.type === "normal" || t.type === "overlay")) {
+                    frag.appendChild(document.createTextNode(seg));
+                    if (segIdx < segments.length - 1) frag.appendChild(document.createElement("br"));
+                    continue;
+                }
+
+                const assigned = {};
+                const overlayConsumed = new Set();
+                for (let i = 0; i < tokens.length; i++) {
+                    const t = tokens[i];
+                    if (t.type !== "overlay") continue;
+                    let assignedTo = -1;
+                    for (let j = i + 1; j < tokens.length; j++)
+                        if (tokens[j].type === "normal") {
+                            assignedTo = j;
+                            break;
                         }
+                    if (assignedTo === -1)
+                        for (let j = i - 1; j >= 0; j--)
+                            if (tokens[j].type === "normal") {
+                                assignedTo = j;
+                                break;
+                            }
+                    if (assignedTo !== -1) {
+                        assigned[assignedTo] = assigned[assignedTo] || [];
+                        assigned[assignedTo].push({
+                            name: t.name,
+                            pos: i
+                        });
+                        overlayConsumed.add(i);
+                    } else {
+                        assigned[`standalone-${i}`] = assigned[`standalone-${i}`] || [];
+                        assigned[`standalone-${i}`].push({
+                            name: t.name,
+                            pos: i,
+                            standalone: true
+                        });
+                    }
+                }
 
-                        if (backCount % 2 === 1) {
-                            flush();
-                            frag.appendChild(document.createTextNode(full));
-                            i = absIdx + full.length;
-                            continue;
-                        }
+                const emittedNormals = new Set();
 
-                        if (m.index === 0) {
-                            flush();
-                            const img = document.createElement("img");
-                            img.alt = img.title = full;
-                            img.style.cssText = "height: 0.75rem; vertical-align: middle; cursor: pointer; image-rendering: auto;";
+                for (let i = 0; i < tokens.length; i++) {
+                    const t = tokens[i];
+                    if (t.type === "text") {
+                        frag.appendChild(document.createTextNode(t.text));
+                    } else if (t.type === "normal") {
+                        if (emittedNormals.has(i)) continue;
+                        emittedNormals.add(i);
 
-                            this._getEmoteUrl(key).then(url => {
-                                img.src = url;
+                        const baseName = t.name;
+                        const overlays = (assigned[i] || []).slice();
+                        overlays.sort((a, b) => a.pos - b.pos);
+
+                        const stack = document.createElement("span");
+                        stack.className = "emote-stack";
+                        if (overlays.length > 0) stack.classList.add("stacked");
+                        stack.title = this._stackTitleFor(baseName, overlays);
+
+                        const baseImg = this._createEmoteImg(baseName, {
+                            isBase: true,
+                            stack
+                        });
+                        baseImg.classList.add("base");
+
+                        const overlayImgs = overlays.map(o => {
+                            const img = this._createEmoteImg(o.name, {
+                                isBase: false,
+                                overlayClass: true,
+                                stack
                             });
-                            img.addEventListener("click", () => navigator.clipboard.writeText(full));
-                            frag.appendChild(img);
-                            i += full.length;
-                            continue;
+                            img.classList.add("overlay");
+                            return {
+                                img,
+                                name: o.name
+                            };
+                        });
+
+                        stack.appendChild(baseImg);
+                        for (const oi of overlayImgs) stack.appendChild(oi.img);
+
+                        const imgsToWait = [baseImg, ...overlayImgs.map(x => x.img)];
+
+                        this._getEmoteUrl(baseName).then(url => {
+                            if (url) baseImg.src = url;
+                        }).catch(() => { });
+                        for (const oi of overlayImgs) {
+                            this._getEmoteUrl(oi.name).then(url => {
+                                if (url) oi.img.src = url;
+                            }).catch(() => { });
+                        }
+
+                        this._waitForImgs(imgsToWait).then(() => {
+                            try {
+                                const computedImgHeights = imgsToWait.map(img => {
+                                    const h = parseFloat(getComputedStyle(img).height);
+                                    if (!isNaN(h) && h > 0) return h;
+                                    const rect = img.getBoundingClientRect();
+                                    if (rect && rect.height > 0) return rect.height;
+                                    return (img.naturalHeight ? img.naturalHeight : 0);
+                                });
+
+                                const targetHeight = computedImgHeights.find(h => h > 0) || 12;
+
+                                const widths = imgsToWait.map(img => {
+                                    const rect = img.getBoundingClientRect();
+                                    if (rect && rect.width > 0) return rect.width;
+                                    if (img.naturalWidth && img.naturalHeight) {
+                                        return (img.naturalWidth / img.naturalHeight) * targetHeight;
+                                    }
+                                    return 0;
+                                });
+
+                                const maxWidth = Math.max(...widths, 0);
+                                if (maxWidth > 0) {
+                                    stack.style.width = `${Math.ceil(maxWidth)}px`;
+                                }
+                                stack.style.height = `${Math.ceil(targetHeight)}px`;
+                            } catch (e) { }
+                        }).catch(() => { });
+
+                        frag.appendChild(stack);
+                    } else if (t.type === "overlay") {
+                        if (overlayConsumed.has(i)) continue;
+
+                        const key = `standalone-${i}`;
+                        if (assigned[key] && assigned[key].length) {
+                            for (const ov of assigned[key]) {
+                                const wrapper = document.createElement("span");
+                                wrapper.className = "emote-stack";
+                                wrapper.title = `;${ov.name};`;
+
+                                const img = this._createEmoteImg(ov.name, {
+                                    isBase: true,
+                                    stack: wrapper
+                                });
+                                img.classList.add("base"); // lone overlay behaves like a base
+                                wrapper.appendChild(img);
+
+                                this._getEmoteUrl(ov.name).then(url => {
+                                    if (url) img.src = url;
+                                }).catch(() => { });
+                                this._waitForImgs([img]).then(() => {
+                                    try {
+                                        const rect = img.getBoundingClientRect();
+                                        const imgH = rect.height || parseFloat(getComputedStyle(img).height) || 12;
+                                        const imgW = rect.width || (img.naturalWidth && img.naturalHeight ? (img.naturalWidth / img.naturalHeight) * imgH : 0);
+                                        if (imgW > 0) wrapper.style.width = `${Math.ceil(imgW)}px`;
+                                        wrapper.style.height = `${Math.ceil(imgH)}px`;
+                                    } catch (e) {
+                                    }
+                                });
+
+                                wrapper.addEventListener("click", () => navigator.clipboard.writeText(wrapper.title));
+                                frag.appendChild(wrapper);
+                            }
+                        } else {
+                            frag.appendChild(document.createTextNode(`;${t.name};`));
                         }
                     }
-
-                    const cp = seg.codePointAt(i);
-                    if (cp >= 0xE000 && cp <= 0xEFFF) {
-                        flush();
-                        const nib = cp & 0x0FFF;
-                        const r = ((nib >> 8) & 0xF) * 17;
-                        const g = ((nib >> 4) & 0xF) * 17;
-                        const b = (nib & 0xF) * 17;
-                        const raw = seg.slice(i, i + 1);
-                        this._appendColor(frag, r, g, b, raw);
-                        i += 1;
-                        continue;
-                    }
-
-                    buffer += seg[i++];
                 }
 
-                flush();
-                if (segIdx < segments.length - 1) {
-                    frag.appendChild(document.createElement("br"));
-                }
+                if (segIdx < segments.length - 1) frag.appendChild(document.createElement("br"));
             }
 
             return frag;
         }
 
-        _appendColor(frag, r, g, b, raw) {
-            const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase();
-            const span = document.createElement("span");
-            span.style.display = "inline-block";
-            span.style.width = "0.75rem";
-            span.style.height = "0.75rem";
-            span.style.verticalAlign = "middle";
-            span.style.backgroundColor = `#${hex}`;
-            span.style.cursor = "pointer";
-            span.title = `#${hex}`;
-            span.addEventListener("click", () => navigator.clipboard.writeText(raw));
-            frag.appendChild(span);
+        _stackTitleFor(baseName, overlays) {
+            const parts = [`:${baseName}:`];
+            for (const ov of overlays) parts.push(`;${ov.name};`);
+            return parts.join(" ");
         }
 
         _initSuggestionListeners() {
@@ -353,7 +564,7 @@
 
             const wrapChar = ch => `<strong style="color: #ff007f;">${ch}</strong>`;
 
-            const showSuggestions = (q, rect) => {
+            const showSuggestions = (q, rect, mode) => {
                 const qLow = q.toLowerCase();
                 const buckets = [[], [], [], []];
                 for (const name of emoteKeys) {
@@ -382,7 +593,10 @@
                     }
                 }
                 const matches = buckets.flat();
-                if (!matches.length) { dd.style.display = "none"; return; }
+                if (!matches.length) {
+                    dd.style.display = "none";
+                    return;
+                }
 
                 dd.innerHTML = "";
                 dd.style.display = "block";
@@ -390,7 +604,8 @@
                 dd.style.bottom = `${window.innerHeight - rect.top + OFFSET}px`;
 
                 const hdr = document.createElement("div");
-                hdr.innerHTML = `<em>Showing top <strong>${matches.length}</strong> suggestion${matches.length === 1 ? "" : "s"}...</em>`;
+                const modeNote = mode === "overlay" ? " (overlay)" : " (normal)";
+                hdr.innerHTML = `<em>Showing top <strong>${matches.length}</strong> suggestion${matches.length === 1 ? "" : "s"}${modeNote}...</em>`;
                 hdr.style.cssText = "font-size: 10px; color: #cccccc; padding: 6px; position: sticky; top: 0; background: #2c2c2c;";
                 dd.appendChild(hdr);
 
@@ -399,8 +614,10 @@
                     item.className = "dropdown-item";
                     item.dataset.index = idx;
                     item.style.cssText = "padding: 6px; cursor: pointer;";
+
                     const img = document.createElement("img");
-                    img.alt = img.title = `:${name}:`;
+                    const tokenText = mode === "overlay" ? `;${name};` : `:${name}:`;
+                    img.alt = img.title = tokenText;
                     img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
                     img.dataset.emote = name;
                     img.src = "";
@@ -415,30 +632,24 @@
                         }
                         else label += ch;
                     }
-                    item.insertAdjacentHTML("beforeend", `:${label}:`);
+                    item.insertAdjacentHTML("beforeend", tokenText[0] + label + tokenText[tokenText.length - 1]);
+
                     item.addEventListener("click", () => {
                         const caret = input.selectionStart ?? input.value.length;
                         const before = input.value.slice(0, caret);
                         let after = input.value.slice(caret);
-
-                        const rightFragMatch = after.match(/^([^:\s]*)/);
+                        const rightFragMatch = after.match(/^([^:\s;]*)/);
                         const rightFrag = rightFragMatch ? rightFragMatch[1] : "";
-                        if (rightFrag) {
-                            after = after.slice(rightFrag.length);
-                        }
+                        if (rightFrag) after = after.slice(rightFrag.length);
 
-                        let insertion = `:${name}:`;
-                        if (after.length > 0 && after[0] === ":") {
+                        let insertion = tokenText;
+                        const delim = mode === "overlay" ? ";" : ":";
+                        if (after.length > 0 && after[0] === delim) {
                             const next = after[1] || "";
-
-                            if (next && !/[\s:]/.test(next)) {
-                                insertion += " ";
-                            } else {
+                            if (next && !/[\s:;]/.test(next)) insertion += " ";
+                            else {
                                 after = after.slice(1);
-
-                                if (!(after.length > 0 && /\s/.test(after[0]))) {
-                                    insertion += " ";
-                                }
+                                if (!(after.length > 0 && /\s/.test(after[0]))) insertion += " ";
                             }
                         } else {
                             if (!(after.length > 0 && /\s/.test(after[0]))) {
@@ -446,12 +657,14 @@
                             }
                         }
 
-                        const newBefore = before.replace(/(?<![\\\w]):([^:\s]*)$/, insertion);
+                        const escPrefix = `(?<![\\w])${delim}([^\\s${delim}]*)$`;
+                        const re = new RegExp(escPrefix);
+                        const newBefore = before.replace(re, insertion);
 
                         input.value = newBefore + after;
                         let newCaretPos = newBefore.length;
                         if (!insertion.endsWith(" ") && after.length > 0 && /\s/.test(after[0])) {
-                            newCaretPos += 1;
+                            newCaretPos++;
                         }
                         input.setSelectionRange(newCaretPos, newCaretPos);
 
@@ -487,7 +700,7 @@
                 });
             };
 
-            const setSelected = idx => {
+            const setSelected = (idx) => {
                 clearSelection();
                 if (idx >= 0) {
                     const el = dd.querySelector(`.dropdown-item[data-index="${idx}"]`);
@@ -504,29 +717,40 @@
                 }
             };
 
+            const beforeReNormal = /(?<![\\\w]):([^:\s]*)$/;
+            const beforeReOverlay = /(?<![\\\w]);([^;\s]*)$/;
+
             input.addEventListener("input", () => {
                 const val = input.value;
                 const caret = input.selectionStart;
                 const before = val.slice(0, caret);
                 const after = val.slice(caret);
 
-                const beforeRe = /(?<![\\\w]):([^:\s]*)$/;
-                const beforeMatch = beforeRe.exec(before);
+                let beforeMatch = beforeReNormal.exec(before);
+                let mode = "normal";
+                if (!beforeMatch) {
+                    beforeMatch = beforeReOverlay.exec(before);
+                    mode = "overlay";
+                }
                 if (!beforeMatch) {
                     dd.style.display = "none";
                     return;
                 }
 
-                const afterFragMatch = after.match(/^([^:\s]*)/);
+                const afterFragMatch = after.match(/^([^:\s;]*)/);
                 const afterFrag = afterFragMatch ? afterFragMatch[1] : "";
                 const combinedQuery = beforeMatch[1] + afterFrag;
 
-                if (/:(?:[^:\s]+):$/.test(before)) {
+                if (mode === "normal" && /:(?:[^:\s]+):$/.test(before)) {
+                    dd.style.display = "none";
+                    return;
+                }
+                if (mode === "overlay" && /;(?:[^;\s]+);$/.test(before)) {
                     dd.style.display = "none";
                     return;
                 }
 
-                showSuggestions(combinedQuery, input.getBoundingClientRect());
+                showSuggestions(combinedQuery, input.getBoundingClientRect(), mode);
             });
 
             input.addEventListener("keydown", e => {
