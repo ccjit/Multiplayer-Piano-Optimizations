@@ -288,27 +288,27 @@
     "amonge": "avif",
     "programming": "avif",
     "chainmeowboom": "avif",
-    "spotted": "avif",
-    "spottedwide": "avif",
+    "spotted": "avif", // overlay
+    "spottedwide": "avif", // overlay
     "yes": "avif",
     "no": "avif",
-    "livereaction": "avif",
-    "mybeloved": "avif",
-    "mybelovedwide": "avif",
-    "jailtime": "avif",
-    "speed": "avif",
-    "rage": "avif",
-    "brick": "avif",
-    "ravetime": "avif",
-    "ravetimewide": "avif",
-    "boom": "avif",
-    "photo": "avif",
-    "petpet": "avif",
-    "soypoint": "avif",
-    "gunpoint": "avif",
-    "lightning": "avif",
-    "hammerbonk": "avif",
-    "lero": "avif",
-    "lagging": "avif",
-    "spongebobworship": "avif"
+    "livereaction": "avif", // overlay
+    "mybeloved": "avif", // overlay
+    "mybelovedwide": "avif", // overlay
+    "jailtime": "avif", // overlay
+    "speed": "avif", // overlay
+    "rage": "avif", // overlay
+    "brick": "avif", // overlay
+    "ravetime": "avif", // overlay
+    "ravetimewide": "avif", // overlay
+    "boom": "avif", // overlay
+    "photo": "avif", // overlay
+    "petpet": "avif", // overlay
+    "soypoint": "avif", // overlay
+    "gunpoint": "avif", // overlay
+    "lightning": "avif", // overlay
+    "hammerbonk": "avif", // overlay
+    "lero": "avif", // overlay
+    "lagging": "avif", // overlay
+    "spongebobworship": "avif" // overlay
 }

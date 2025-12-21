@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.6.1
+// @version      1.6.2
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -205,9 +205,12 @@
         }
 
         async _loadEmotesMeta() {
-            const res = await fetch(`${this.baseUrl}/emotes/meta.json?_=${Date.now()}`);
+            const res = await fetch(`${this.baseUrl}/emotes/meta.json5?_=${Date.now()}`);
             if (!res.ok) throw new Error(`Failed to load emote metadata: ${res.status}`);
-            this.emotes = await res.json();
+
+            const raw = await res.text();
+            const cleaned = raw.replace(/(\/\*[\s\S]*?\*\/|\/\/.*?$)/gm, "").trim();
+            this.emotes = JSON.parse(cleaned);
         }
 
         _buildTokenRegex() {
