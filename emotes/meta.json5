@@ -310,5 +310,7 @@
     "hammerbonk": "avif", // overlay
     "lero": "avif", // overlay
     "lagging": "avif", // overlay
-    "spongebobworship": "avif" // overlay
+    "spongebobworship": "avif", // overlay
+    "aintnorway": "avif",
+    "missilestrike": "avif" // overlay
 }
