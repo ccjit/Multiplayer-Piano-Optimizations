@@ -312,5 +312,11 @@
     "lagging": "avif", // overlay
     "spongebobworship": "avif", // overlay
     "aintnorway": "avif",
-    "missilestrike": "avif" // overlay
+    "missilestrike": "avif", // overlay
+    "sure": "avif",
+    "wait": "avif",
+    "meandyou": "avif",
+    "catask": "avif",
+    "cantanswer": "avif",
+    "belka": "avif"
 }
