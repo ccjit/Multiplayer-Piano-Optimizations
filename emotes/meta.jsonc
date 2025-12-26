@@ -365,5 +365,13 @@
     "raintime": "avif", // overlay
     "raintimewide": "avif", // overlay
     "confetti": "avif", // overlay
-    "fog": "avif" // overlay
+    "fog": "avif", // overlay
+    "parasocial": "avif",
+    "jigglin": "avif",
+    "lmaoooooooooo": "avif",
+    "awkward": "avif",
+    "please": "avif",
+    "smadge": "avif",
+    "oldge": "avif",
+    "baldge": "avif"
 }
