@@ -361,5 +361,9 @@
     "tuckk": "avif",
     "pagman": "avif",
     "monka": "avif",
-    "boing": "avif"
+    "boing": "avif",
+    "raintime": "avif", // overlay
+    "raintimewide": "avif", // overlay
+    "confetti": "avif", // overlay
+    "fog": "avif" // overlay
 }
