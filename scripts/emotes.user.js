@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.6.3
+// @version      1.7.0
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -435,7 +435,7 @@
                 const seg = segments[segIdx];
 
                 if (!this.combinedRegex) {
-                    frag.appendChild(document.createTextNode(seg));
+                    this._appendTextWithColors(frag, seg);
                     if (segIdx < segments.length - 1) frag.appendChild(document.createElement("br"));
                     continue;
                 }
@@ -443,7 +443,7 @@
                 const tokens = this._tokenizeSegment(seg);
 
                 if (!tokens.some(t => t.type === "normal" || t.type === "overlay")) {
-                    frag.appendChild(document.createTextNode(seg));
+                    this._appendTextWithColors(frag, seg);
                     if (segIdx < segments.length - 1) frag.appendChild(document.createElement("br"));
                     continue;
                 }
@@ -542,6 +542,42 @@
             for (const ov of overlays) parts.push(`;${ov.name};`);
             parts.push(`:${baseName}:`);
             return parts.join(" ");
+        }
+
+        _appendColor(frag, r, g, b, raw) {
+            const hex = ((r << 16) | (g << 8) | b).toString(16).padStart(6, "0").toUpperCase();
+            const span = document.createElement("span");
+            span.style.display = "inline-block";
+            span.style.width = "0.75rem";
+            span.style.height = "0.75rem";
+            span.style.verticalAlign = "middle";
+            span.style.backgroundColor = `#${hex}`;
+            span.style.cursor = "pointer";
+            span.title = `#${hex}`;
+            span.addEventListener("click", () => navigator.clipboard.writeText(raw));
+            frag.appendChild(span);
+        }
+
+        _appendTextWithColors(frag, text) {
+            let buf = "";
+            for (let i = 0; i < text.length;) {
+                const cp = text.codePointAt(i);
+                const chLen = cp > 0xFFFF ? 2 : 1;
+                if (cp >= 0xE000 && cp <= 0xEFFF) {
+                    if (buf.length) { frag.appendChild(document.createTextNode(buf)); buf = ""; }
+                    const nib = cp & 0x0FFF;
+                    const r = ((nib >> 8) & 0xF) * 17;
+                    const g = ((nib >> 4) & 0xF) * 17;
+                    const b = (nib & 0xF) * 17;
+                    const raw = text.slice(i, i + chLen);
+                    this._appendColor(frag, r, g, b, raw);
+                    i += chLen;
+                } else {
+                    buf += String.fromCodePoint(cp);
+                    i += chLen;
+                }
+            }
+            if (buf.length) frag.appendChild(document.createTextNode(buf));
         }
 
         _initSuggestionListeners() {
