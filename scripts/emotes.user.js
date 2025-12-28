@@ -176,9 +176,7 @@
                         const img = entry.target;
                         const name = img.dataset.emote;
                         if (name) {
-                            this._getEmoteUrl(name).then(url => {
-                                if (url) img.src = url;
-                            });
+                            this._setImgSrc(img, name);
                         }
                         try {
                             this.suggestionsObserver.unobserve(img);
@@ -229,6 +227,59 @@
             this.combinedRegex = new RegExp(`:(${tokenList}):|;(${tokenList});`, "g");
         }
 
+        _tokenizeSegment(seg) {
+            const tokens = [];
+            let lastIndex = 0;
+            this.combinedRegex.lastIndex = 0;
+            let m;
+            while ((m = this.combinedRegex.exec(seg)) !== null) {
+                const matchIndex = m.index;
+                // check escaping
+                let k = matchIndex - 1, backCount = 0;
+                while (k >= 0 && seg[k] === "\\") {
+                    backCount++;
+                    k--;
+                }
+                if (backCount % 2 === 1) {
+                    const upTo = this.combinedRegex.lastIndex;
+                    if (upTo > lastIndex) tokens.push({ type: "text", text: seg.slice(lastIndex, upTo) });
+                    lastIndex = upTo;
+                    continue;
+                }
+
+                if (matchIndex > lastIndex) tokens.push({ type: "text", text: seg.slice(lastIndex, matchIndex) });
+                if (m[1]) tokens.push({ type: "normal", name: m[1] });
+                else if (m[2]) tokens.push({ type: "overlay", name: m[2] });
+                lastIndex = this.combinedRegex.lastIndex;
+            }
+            if (lastIndex < seg.length) tokens.push({ type: "text", text: seg.slice(lastIndex) });
+            return tokens;
+        }
+
+        _assignOverlays(tokens) {
+            const assigned = {};
+            const overlayConsumed = new Set();
+            for (let i = 0; i < tokens.length; i++) {
+                const t = tokens[i];
+                if (t.type !== "overlay") continue;
+                let assignedTo = -1;
+                for (let j = i + 1; j < tokens.length; j++)
+                    if (tokens[j].type === "normal") { assignedTo = j; break; }
+                if (assignedTo === -1)
+                    for (let j = i - 1; j >= 0; j--)
+                        if (tokens[j].type === "normal") { assignedTo = j; break; }
+                if (assignedTo !== -1) {
+                    assigned[assignedTo] = assigned[assignedTo] || [];
+                    assigned[assignedTo].push({ name: t.name, pos: i });
+                    overlayConsumed.add(i);
+                } else {
+                    assigned[`standalone-${i}`] = assigned[`standalone-${i}`] || [];
+                    assigned[`standalone-${i}`].push({ name: t.name, pos: i, standalone: true });
+                }
+            }
+            return { assigned, overlayConsumed };
+        }
+
         async _getEmoteUrl(key) {
             if (this.emoteUrls[key]) return this.emoteUrls[key];
             if (this.emotePromises[key]) return this.emotePromises[key];
@@ -276,6 +327,50 @@
             });
 
             return img;
+        }
+
+        _setImgSrc(img, name) {
+            this._getEmoteUrl(name).then(url => {
+                if (url) img.src = url;
+            }).catch(() => {});
+        }
+
+        _tryObserveOrSet(img, name) {
+            try {
+                this.suggestionsObserver.observe(img);
+            } catch (e) {
+                this._setImgSrc(img, name);
+            }
+        }
+
+        async _fitImgsToStack(imgs, stack) {
+            await this._waitForImgs(imgs);
+            try {
+                const computedImgHeights = imgs.map(img => {
+                    const h = parseFloat(getComputedStyle(img).height);
+                    if (!isNaN(h) && h > 0) return h;
+                    const rect = img.getBoundingClientRect();
+                    if (rect && rect.height > 0) return rect.height;
+                    return (img.naturalHeight ? img.naturalHeight : 0);
+                });
+
+                const targetHeight = computedImgHeights.find(h => h > 0) || 12;
+
+                const widths = imgs.map(img => {
+                    const rect = img.getBoundingClientRect();
+                    if (rect && rect.width > 0) return rect.width;
+                    if (img.naturalWidth && img.naturalHeight) {
+                        return (img.naturalWidth / img.naturalHeight) * targetHeight;
+                    }
+                    return 0;
+                });
+
+                const maxWidth = Math.max(...widths, 0);
+                if (maxWidth > 0) {
+                    stack.style.width = `${Math.ceil(maxWidth)}px`;
+                }
+                stack.style.height = `${Math.ceil(targetHeight)}px`;
+            } catch (e) {}
         }
 
         _waitForImgs(imgs, timeout = 1200) {
@@ -345,47 +440,7 @@
                     continue;
                 }
 
-                const tokens = [];
-                let lastIndex = 0;
-                this.combinedRegex.lastIndex = 0;
-                let m;
-                while ((m = this.combinedRegex.exec(seg)) !== null) {
-                    const matchIndex = m.index;
-                    // check escaping
-                    let k = matchIndex - 1,
-                        backCount = 0;
-                    while (k >= 0 && seg[k] === "\\") {
-                        backCount++;
-                        k--;
-                    }
-                    if (backCount % 2 === 1) {
-                        const upTo = this.combinedRegex.lastIndex;
-                        if (upTo > lastIndex) tokens.push({
-                            type: "text",
-                            text: seg.slice(lastIndex, upTo)
-                        });
-                        lastIndex = upTo;
-                        continue;
-                    }
-
-                    if (matchIndex > lastIndex) tokens.push({
-                        type: "text",
-                        text: seg.slice(lastIndex, matchIndex)
-                    });
-                    if (m[1]) tokens.push({
-                        type: "normal",
-                        name: m[1]
-                    });
-                    else if (m[2]) tokens.push({
-                        type: "overlay",
-                        name: m[2]
-                    });
-                    lastIndex = this.combinedRegex.lastIndex;
-                }
-                if (lastIndex < seg.length) tokens.push({
-                    type: "text",
-                    text: seg.slice(lastIndex)
-                });
+                const tokens = this._tokenizeSegment(seg);
 
                 if (!tokens.some(t => t.type === "normal" || t.type === "overlay")) {
                     frag.appendChild(document.createTextNode(seg));
@@ -393,39 +448,7 @@
                     continue;
                 }
 
-                const assigned = {};
-                const overlayConsumed = new Set();
-                for (let i = 0; i < tokens.length; i++) {
-                    const t = tokens[i];
-                    if (t.type !== "overlay") continue;
-                    let assignedTo = -1;
-                    for (let j = i + 1; j < tokens.length; j++)
-                        if (tokens[j].type === "normal") {
-                            assignedTo = j;
-                            break;
-                        }
-                    if (assignedTo === -1)
-                        for (let j = i - 1; j >= 0; j--)
-                            if (tokens[j].type === "normal") {
-                                assignedTo = j;
-                                break;
-                            }
-                    if (assignedTo !== -1) {
-                        assigned[assignedTo] = assigned[assignedTo] || [];
-                        assigned[assignedTo].push({
-                            name: t.name,
-                            pos: i
-                        });
-                        overlayConsumed.add(i);
-                    } else {
-                        assigned[`standalone-${i}`] = assigned[`standalone-${i}`] || [];
-                        assigned[`standalone-${i}`].push({
-                            name: t.name,
-                            pos: i,
-                            standalone: true
-                        });
-                    }
-                }
+                const { assigned, overlayConsumed } = this._assignOverlays(tokens);
 
                 const emittedNormals = new Set();
 
@@ -471,43 +494,12 @@
 
                         const imgsToWait = [baseImg, ...overlayImgs.map(x => x.img)];
 
-                        this._getEmoteUrl(baseName).then(url => {
-                            if (url) baseImg.src = url;
-                        }).catch(() => { });
-                        for (const oi of overlayImgs) {
-                            this._getEmoteUrl(oi.name).then(url => {
-                                if (url) oi.img.src = url;
-                            }).catch(() => { });
-                        }
+                        // set image sources (use cached fetch)
+                        this._setImgSrc(baseImg, baseName);
+                        for (const oi of overlayImgs) this._setImgSrc(oi.img, oi.name);
 
-                        this._waitForImgs(imgsToWait).then(() => {
-                            try {
-                                const computedImgHeights = imgsToWait.map(img => {
-                                    const h = parseFloat(getComputedStyle(img).height);
-                                    if (!isNaN(h) && h > 0) return h;
-                                    const rect = img.getBoundingClientRect();
-                                    if (rect && rect.height > 0) return rect.height;
-                                    return (img.naturalHeight ? img.naturalHeight : 0);
-                                });
-
-                                const targetHeight = computedImgHeights.find(h => h > 0) || 12;
-
-                                const widths = imgsToWait.map(img => {
-                                    const rect = img.getBoundingClientRect();
-                                    if (rect && rect.width > 0) return rect.width;
-                                    if (img.naturalWidth && img.naturalHeight) {
-                                        return (img.naturalWidth / img.naturalHeight) * targetHeight;
-                                    }
-                                    return 0;
-                                });
-
-                                const maxWidth = Math.max(...widths, 0);
-                                if (maxWidth > 0) {
-                                    stack.style.width = `${Math.ceil(maxWidth)}px`;
-                                }
-                                stack.style.height = `${Math.ceil(targetHeight)}px`;
-                            } catch (e) { }
-                        }).catch(() => { });
+                        // fit sizes via shared helper
+                        this._fitImgsToStack(imgsToWait, stack).catch(() => {});
 
                         frag.appendChild(stack);
                     } else if (t.type === "overlay") {
@@ -527,19 +519,8 @@
                                 img.classList.add("base"); // lone overlay behaves like a base
                                 wrapper.appendChild(img);
 
-                                this._getEmoteUrl(ov.name).then(url => {
-                                    if (url) img.src = url;
-                                }).catch(() => { });
-                                this._waitForImgs([img]).then(() => {
-                                    try {
-                                        const rect = img.getBoundingClientRect();
-                                        const imgH = rect.height || parseFloat(getComputedStyle(img).height) || 12;
-                                        const imgW = rect.width || (img.naturalWidth && img.naturalHeight ? (img.naturalWidth / img.naturalHeight) * imgH : 0);
-                                        if (imgW > 0) wrapper.style.width = `${Math.ceil(imgW)}px`;
-                                        wrapper.style.height = `${Math.ceil(imgH)}px`;
-                                    } catch (e) {
-                                    }
-                                });
+                                this._setImgSrc(img, ov.name);
+                                this._fitImgsToStack([img], wrapper).catch(() => {});
 
                                 wrapper.addEventListener("click", () => navigator.clipboard.writeText(wrapper.title));
                                 frag.appendChild(wrapper);
@@ -623,15 +604,21 @@
                     item.dataset.index = idx;
                     item.style.cssText = "padding: 6px; cursor: pointer;";
 
-                    const img = document.createElement("img");
                     const tokenText = mode === "overlay" ? `;${name};` : `:${name}:`;
+                    const img = this._createEmoteImg(name, { isBase: true });
+                    img.style.height = "1rem";
+                    img.style.verticalAlign = "middle";
+                    img.style.marginRight = "4px";
+                    img.style.imageRendering = "auto";
                     img.alt = img.title = tokenText;
-                    img.style.cssText = "height: 1rem; vertical-align: middle; margin-right: 4px; image-rendering: auto;";
                     img.dataset.emote = name;
                     img.src = "";
                     item.appendChild(img);
 
                     let label = "";
+
+                    // lazy load or direct load
+                    this._tryObserveOrSet(img, name);
                     let qi = 0;
                     for (const ch of name) {
                         if (qi < qLow.length && ch.toLowerCase() === qLow[qi]) {
@@ -680,13 +667,7 @@
                         input.focus();
                     });
 
-                    try {
-                        this.suggestionsObserver.observe(img);
-                    } catch (e) {
-                        this._getEmoteUrl(name).then(url => {
-                            if (url) img.src = url;
-                        });
-                    }
+
 
                     dd.appendChild(item);
                 });
