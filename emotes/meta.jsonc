@@ -72,7 +72,7 @@
     "corpa": "webp",
     "popcat": "webp",
     "hiii": "webp",
-    "loll": "webp",
+    "lol": "webp",
     "sadhamster": "webp",
     "icant": "webp",
     "crunch": "webp",
@@ -378,5 +378,8 @@
     "weirdge": "avif",
     "forsen": "avif",
     "reallysad": "avif",
-    "firsttime": "avif" // overlay
+    "firsttime": "avif", // overlay
+    "lulw": "avif",
+    "keke": "avif",
+    "lolwide": "avif"
 }
