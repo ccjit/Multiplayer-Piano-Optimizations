@@ -377,5 +377,6 @@
     "based": "avif",
     "weirdge": "avif",
     "forsen": "avif",
-    "reallysad": "avif"
+    "reallysad": "avif",
+    "firsttime": "avif" // overlay
 }
