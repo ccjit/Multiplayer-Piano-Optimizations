@@ -47,8 +47,22 @@ TODO:
         - ignore users from other rooms
         - decode packet
         - draw lines or erase lines
+    - customizeable settings
+        - color
+        - line width
+        - erase factor
+        - line life
+        - line fade
+    - qol features
+        - mute lines
+        - disable/enable
+        - fix mac cmd/ctrl
     - bug testing
+    - write readme
     - push to greasyfork
+    - implement into zackibot cursor animations
+        - lineLifeMs: totalMs - elapsedMs + endAnimationMs * elapsedMs / totalMs
+        - lineFadeMs: fadeMs
 */
 
 (async () => {
@@ -233,7 +247,7 @@ TODO:
                 if (this.#isShiftDown && this.#clicking) {
                     this.#updateValues();
 
-                    const uuid = this.#generateUUID();
+                    const uuid = this.generateUUID();
                     this.drawLine({
                         x1: this.#lastPosition.x,
                         y1: this.#lastPosition.y,
@@ -253,7 +267,11 @@ TODO:
                     const maxDim = Math.max(this.#canvas.width, this.#canvas.height) || 1;
                     const radius = this.#lineWidth * this.#eraseFactor / maxDim;
 
-                    const removedUuids = this.eraseAtPoint(this.#position.x, this.#position.y, radius);
+                    const removedUuids = this.erase({
+                        x: this.#position.x,
+                        y: this.#position.y,
+                        radius: radius
+                    });
 
                     for (const uuid of removedUuids) {
                         const op = this.#buildErasePacket(uuid);
@@ -270,23 +288,16 @@ TODO:
             });
         }
 
-        #generateUUID = () => {
-            if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                const r = new Uint8Array(12);
-                crypto.getRandomValues(r);
-                const toHex = (n) => n.toString(16).padStart(2, "0");
-                return Array.from(r, toHex).join("");
-            } else {
-                return Array.from({ length: 12 }, () => {
-                    const r = Math.random() * 16 | 0;
-                    return r.toString(16).padStart(2, "0");
-                }).join("");
-            }
-        }
-
         #writeFloat64LE = (bytes, val) => {
             const buf = new ArrayBuffer(8);
             new DataView(buf).setFloat64(0, val, true);
+            const u8 = new Uint8Array(buf);
+            for (let b of u8) bytes.push(b);
+        }
+
+        #writeFloat32LE = (bytes, val) => {
+            const buf = new ArrayBuffer(4);
+            new DataView(buf).setFloat32(0, val, true);
             const u8 = new Uint8Array(buf);
             for (let b of u8) bytes.push(b);
         }
@@ -313,9 +324,15 @@ TODO:
             bytes.push(...part);
         }
 
-        #writeString = (bytes, str) => {
+        #writeString = (bytes, strOrBytes) => {
+            if (strOrBytes instanceof Uint8Array) {
+                this.#writeULEB128(bytes, strOrBytes.length);
+                for (const b of strOrBytes) bytes.push(b);
+                return;
+            }
+
             const textEncoder = new TextEncoder();
-            const buf = textEncoder.encode(str);
+            const buf = textEncoder.encode(String(strOrBytes));
             this.#writeULEB128(bytes, buf.length);
             for (const b of buf) bytes.push(b);
         }
@@ -325,8 +342,8 @@ TODO:
             bytes.push(1);
             this.#writeString(bytes, uuid);
             this.#writeColor(bytes, color);
-            this.#writeFloat64LE(bytes, x);
-            this.#writeFloat64LE(bytes, y);
+            this.#writeFloat32LE(bytes, x);
+            this.#writeFloat32LE(bytes, y);
             bytes.push(lineWidth & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
@@ -347,8 +364,7 @@ TODO:
                 MPP.client.sendArray([{
                     m: "custom",
                     data: {
-                        m: "drawboard",
-                        l: finalPayload
+                        drawboard: finalPayload
                     },
                     target: { mode: "subscribed" }
                 }]);
@@ -380,6 +396,22 @@ TODO:
         #updateValues = () => {
             const participant = this.participant;
             this.#color = participant.color;
+        }
+
+        #pointToSegmentDistance = (px, py, x1, y1, x2, y2) => {
+            const vx = x2 - x1;
+            const vy = y2 - y1;
+            const wx = px - x1;
+            const wy = py - y1;
+            const c = (wx * vx + wy * vy);
+            const d = (vx * vx + vy * vy);
+            let t = 0;
+            if (d !== 0) t = Math.max(0, Math.min(1, c / d));
+            const projx = x1 + t * vx;
+            const projy = y1 + t * vy;
+            const dx = px - projx;
+            const dy = py - projy;
+            return Math.sqrt(dx * dx + dy * dy);
         }
 
         #clear = () => {
@@ -435,6 +467,21 @@ TODO:
             requestAnimationFrame(this.#draw);
         }
 
+        generateUUID = () => {
+            const arr = new Uint8Array(6);
+            if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                crypto.getRandomValues(arr);
+            } else {
+                for (let i = 0; i < 6; i++) arr[i] = Math.floor(Math.random() * 256);
+            }
+            return arr;
+        }
+
+        uuidToHex = (u8) => {
+            if (!(u8 instanceof Uint8Array)) return String(u8);
+            return Array.from(u8).map(b => b.toString(16).padStart(2, "0")).join("");
+        };
+
         drawLine = ({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid }) => {
             this.#lineBuffer.push({
                 x1, y1,
@@ -448,7 +495,7 @@ TODO:
             });
         }
 
-        eraseAtPoint = (x, y, radius) => {
+        erase = ({ x, y, radius }) => {
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
             const removed = [];
             for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
@@ -461,22 +508,6 @@ TODO:
             }
 
             return Array.from(new Set(removed));
-        }
-
-        #pointToSegmentDistance = (px, py, x1, y1, x2, y2) => {
-            const vx = x2 - x1;
-            const vy = y2 - y1;
-            const wx = px - x1;
-            const wy = py - y1;
-            const c = (wx * vx + wy * vy);
-            const d = (vx * vx + vy * vy);
-            let t = 0;
-            if (d !== 0) t = Math.max(0, Math.min(1, c / d));
-            const projx = x1 + t * vx;
-            const projy = y1 + t * vy;
-            const dx = px - projx;
-            const dy = py - projy;
-            return Math.sqrt(dx * dx + dy * dy);
         }
     }
 
