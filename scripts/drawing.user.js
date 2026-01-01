@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.4
+// @version      2.0.5
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -41,7 +41,41 @@
 // @updateURL    https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.meta.js
 // ==/UserScript==
 
-/* (header unchanged) */
+/*
+    ### OP 0: Clear user
+    - <uint8 op>
+    1. Tells clients to clear this user's
+    lines
+ 
+    ### OP 1: Clear lines
+    - <uint8 op> <uleb128 length> <uint32 uuid>*
+    1. Tells clients to clear lines with
+    uuids provided
+ 
+    ### OP 2: Quick line
+    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
+    1. Tells clients to draw a line from
+    (x1, y1) to (x2, y2) with options and
+    provides a line uuid
+ 
+    ### OP 3: Start chain
+    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
+    1. Tells clients to set a point at
+    (x, y) to start a chain of lines with
+    options
+ 
+    ### OP 4: Continue chain
+    - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
+    1. Tells clients to continue off of
+    the user's chain to point (x, y) and
+    provides a line uuid (the (x, y) here
+    should after be set to (x1, y1) so that
+    the next continue will use that as the
+    start points, etc.)
+ 
+ 
+    * Denotes multiple allowed
+*/
 
 (async () => {
     const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
