@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -552,7 +552,7 @@
         }
 
         handleIncomingData = (payload) => {
-            console.log(payload);
+            // console.log(payload);
             if (!payload) return;
 
             try {
