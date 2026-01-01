@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -37,6 +37,8 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
+// @downloadURL  https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.user.js
+// @updateURL    https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.meta.js
 // ==/UserScript==
 
 (async () => {
