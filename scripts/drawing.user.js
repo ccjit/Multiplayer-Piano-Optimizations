@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.1
+// @version      2.0.2
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -146,13 +146,11 @@
         #lineLifeMs = 5000;
         #lineFadeMs = 3000;
         #lineBuffer = [];
-        // now holds structured ops, not raw bytes
         #opBuffer = [];
         #payloadFlushMs = 200;
         #flushInterval;
         #mouseMoveThrottleMs = 50;
         #lastMouseMoveAt = 0;
-
         #chains = new Map();
         #localChainStarted = false;
 
@@ -283,8 +281,6 @@
                 this.#updatePosition();
                 if (!this.#lastPosition) this.#lastPosition = this.#position;
                 if (this.#isShiftDown && this.#clicking) {
-                    this.#updateValues();
-
                     const start = this.#lastPosition;
                     const end = this.#position;
 
@@ -297,7 +293,6 @@
 
                     this.#lastPosition = this.#position;
                 } else if (this.#isCtrlDown && this.#clicking) {
-                    this.#updateValues();
                     const maxDim = Math.max(this.#canvas.width, this.#canvas.height) || 1;
                     const radius = this.#lineWidth * this.#eraseFactor / maxDim;
 
@@ -322,6 +317,9 @@
             window.addEventListener("beforeunload", () => {
                 if (this.#flushInterval) clearInterval(this.#flushInterval);
             });
+
+            const participant = this.participant;
+            if (participant?.color) this.#color = participant.color;
         }
 
         #readUint8 = (bytes, state) => {
@@ -615,11 +613,6 @@
             this.#opBuffer.length = 0;
         }
 
-        #updateValues = () => {
-            const participant = this.participant;
-            this.#color = participant?.color || this.#color;
-        }
-
         #pointToSegmentDistance = (px, py, x1, y1, x2, y2) => {
             const vx = x2 - x1;
             const vy = y2 - y1;
@@ -732,7 +725,7 @@
             this.#lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
         }
 
-        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null }) {
+        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null } = {}) {
             this.#lineBuffer.push({
                 x1, y1,
                 x2, y2,
@@ -871,7 +864,7 @@
             return results;
         }
 
-        renderErase({ x, y, radius }) {
+        renderErase({ x, y, radius } = {}) {
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
             const removed = [];
             for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
@@ -887,7 +880,7 @@
             return removedUUIDs;
         }
 
-        erase = ({ x, y, radius }) => {
+        erase = ({ x, y, radius } = {}) => {
             const removedUUIDs = this.renderErase({ x, y, radius });
             return removedUUIDs;
         }
