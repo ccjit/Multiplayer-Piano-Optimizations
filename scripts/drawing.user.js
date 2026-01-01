@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.3
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -222,7 +222,6 @@
                 if (this.#isShiftDown && this.#clicking) {
                     this.#updateValues();
 
-                    const uuid = this.generateUUID();
                     this.drawLine({
                         x1: this.#lastPosition.x,
                         y1: this.#lastPosition.y,
@@ -232,34 +231,18 @@
                         lineWidth: this.#lineWidth,
                         lineLifeMs: this.#lineLifeMs,
                         lineFadeMs: this.#lineFadeMs,
-                        uuid: uuid
+                        uuid: this.generateUUID()
                     });
-
-                    const op = this.#buildDrawPacket(
-                        uuid,
-                        this.#lastPosition.x, this.#lastPosition.y,
-                        this.#position.x, this.#position.y,
-                        this.#color,
-                        this.#lineWidth,
-                        this.#lineLifeMs,
-                        this.#lineFadeMs
-                    );
-                    this.#opBuffer.push(op);
                 } else if (this.#isCtrlDown && this.#clicking) {
                     this.#updateValues();
                     const maxDim = Math.max(this.#canvas.width, this.#canvas.height) || 1;
                     const radius = this.#lineWidth * this.#eraseFactor / maxDim;
 
-                    const removedUuids = this.erase({
+                    this.erase({
                         x: this.#position.x,
                         y: this.#position.y,
                         radius: radius
                     });
-
-                    for (const uuid of removedUuids) {
-                        const op = this.#buildErasePacket(uuid);
-                        this.#opBuffer.push(op);
-                    }
                 }
             });
 
@@ -368,15 +351,15 @@
             for (const b of buf) bytes.push(b);
         }
 
-        #removeLinesByUuid = (uuid) => {
+        #removeLinesByUUID = (uuid) => {
             const hex = this.uuidToHex(uuid);
             const removed = [];
             for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
                 const line = this.#lineBuffer[i];
-                const lineUuid = line.uuid;
-                const lineHex = (lineUuid instanceof Uint8Array) ? this.uuidToHex(lineUuid) : String(lineUuid);
+                const lineUUID = line.uuid;
+                const lineHex = (lineUUID instanceof Uint8Array) ? this.uuidToHex(lineUUID) : String(lineUUID);
                 if (lineHex === hex) {
-                    removed.push(lineUuid || uuid);
+                    removed.push(lineUUID || uuid);
                     this.#lineBuffer.splice(i, 1);
                 }
             }
@@ -521,34 +504,6 @@
         uuidToHex = (u8) => {
             if (!(u8 instanceof Uint8Array)) return String(u8);
             return Array.from(u8).map(b => b.toString(16).padStart(2, "0")).join("");
-        };
-
-        drawLine = ({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid }) => {
-            this.#lineBuffer.push({
-                x1, y1,
-                x2, y2,
-                color,
-                lineWidth,
-                lineLifeMs,
-                lineFadeMs,
-                timestamp: Date.now(),
-                uuid: uuid
-            });
-        }
-
-        erase = ({ x, y, radius }) => {
-            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
-            const removed = [];
-            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
-                const line = this.#lineBuffer[i];
-                const d = this.#pointToSegmentDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                if (d <= radius) {
-                    if (line.uuid) removed.push(line.uuid);
-                    this.#lineBuffer.splice(i, 1);
-                }
-            }
-
-            return Array.from(new Set(removed));
         }
 
         handleIncomingData = (payload) => {
@@ -566,7 +521,7 @@
                     const type = this.#readUint8(bytes, state);
                     if (type === 0) { // erase
                         const uuidBytes = this.#readString(bytes, state);
-                        this.#removeLinesByUuid(uuidBytes);
+                        this.#removeLinesByUUID(uuidBytes);
                     } else if (type === 1) { // draw
                         const uuidBytes = this.#readString(bytes, state);
                         const color = this.#readColor(bytes, state);
@@ -578,7 +533,7 @@
                         const lifeMs = this.#readULEB128(bytes, state);
                         const fadeMs = this.#readULEB128(bytes, state);
 
-                        this.drawLine({
+                        this.renderLine({
                             x1, y1, x2, y2,
                             color,
                             lineWidth,
@@ -594,6 +549,64 @@
             } catch (err) {
                 console.warn("Failed to parse incoming drawboard payload:", err);
             }
+        }
+
+        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID() }) {
+            this.#lineBuffer.push({
+                x1, y1,
+                x2, y2,
+                color,
+                lineWidth,
+                lineLifeMs,
+                lineFadeMs,
+                timestamp: Date.now(),
+                uuid: uuid
+            });
+
+            return uuid;
+        }
+
+        drawLine = ({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID() }) => {
+            this.renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid });
+
+            const op = this.#buildDrawPacket(
+                uuid,
+                x1, y1,
+                x2, y2,
+                color,
+                lineWidth,
+                lineLifeMs,
+                lineFadeMs
+            );
+            this.#opBuffer.push(op);
+
+            return uuid;
+        }
+
+        renderErase({ x, y, radius }) {
+            if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
+            const removed = [];
+            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
+                const line = this.#lineBuffer[i];
+                const d = this.#pointToSegmentDistance(x, y, line.x1, line.y1, line.x2, line.y2);
+                if (d <= radius) {
+                    if (line.uuid) removed.push(line.uuid);
+                    this.#lineBuffer.splice(i, 1);
+                }
+            }
+
+            const removedUUIDs = Array.from(new Set(removed));
+            return removedUUIDs;
+        }
+
+        erase = ({ x, y, radius }) => {
+            const removedUUIDs = this.renderErase({ x, y, radius });
+            for (const uuid of removedUUIDs) {
+                const op = this.#buildErasePacket(uuid);
+                this.#opBuffer.push(op);
+            }
+
+            return removedUUIDs;
         }
     }
 
