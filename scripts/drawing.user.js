@@ -37,33 +37,7 @@
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=multiplayerpiano.net
 // @grant        GM_info
 // @license      MIT
-// @downloadURL  !!!
-// @updateURL    !!!
 // ==/UserScript==
-
-/*
-TODO:
-    - client-bound packets
-        - ignore users from other rooms
-        - decode packet
-        - draw lines or erase lines
-    - customizeable settings
-        - color
-        - line width
-        - erase factor
-        - line life
-        - line fade
-    - qol features
-        - mute lines
-        - disable/enable
-        - fix mac cmd/ctrl
-    - bug testing
-    - write readme
-    - push to greasyfork
-    - implement into zackibot cursor animations
-        - lineLifeMs: totalMs - elapsedMs + endAnimationMs * elapsedMs / totalMs
-        - lineFadeMs: fadeMs
-*/
 
 (async () => {
     const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
@@ -122,7 +96,6 @@ TODO:
     class Drawboard {
         #canvas;
         #ctx;
-        #connected = false;
         #enabled = true;
         #isShiftDown = false;
         #isCtrlDown = false;
@@ -145,7 +118,7 @@ TODO:
             this.#canvas.style.position = "absolute";
             this.#canvas.style.top = "0px";
             this.#canvas.style.left = "0px";
-            this.#canvas.style.zIndex = "400";
+            this.#canvas.style.zIndex = "800";
             this.#canvas.style.pointerEvents = "none";
             document.documentElement.appendChild(this.#canvas);
 
@@ -167,8 +140,8 @@ TODO:
         get ctx() {
             return this.#ctx;
         }
-        get connected() {
-            return this.#connected;
+        static get connected() {
+            return MPP && MPP.client && MPP.client.isConnected() && MPP.client.channel && MPP.client.user && MPP.client.ppl
         }
         get enabled() {
             return this.#enabled;
@@ -260,7 +233,15 @@ TODO:
                         uuid: uuid
                     });
 
-                    const op = this.#buildDrawPacket(uuid, this.#position.x, this.#position.y, this.#color, this.#lineWidth, this.#lineLifeMs, this.#lineFadeMs);
+                    const op = this.#buildDrawPacket(
+                        uuid,
+                        this.#lastPosition.x, this.#lastPosition.y,
+                        this.#position.x, this.#position.y,
+                        this.#color,
+                        this.#lineWidth,
+                        this.#lineLifeMs,
+                        this.#lineFadeMs
+                    );
                     this.#opBuffer.push(op);
                 } else if (this.#isCtrlDown && this.#clicking) {
                     this.#updateValues();
@@ -288,6 +269,21 @@ TODO:
             });
         }
 
+        #readUint8 = (bytes, state) => {
+            if (state.i >= bytes.length) throw new Error("Unexpected end of payload (uint8).");
+            return bytes[state.i++];
+        }
+        #writeUint8 = (bytes, val) => {
+            bytes.push(val & 0xFF);
+        }
+
+        #readFloat64LE = (bytes, state) => {
+            if (state.i + 8 > bytes.length) throw new Error("Unexpected end of payload (float64).");
+            const tmp = new Uint8Array(bytes.slice(state.i, state.i + 8)).buffer;
+            const val = new DataView(tmp).getFloat64(0, true);
+            state.i += 8;
+            return val;
+        }
         #writeFloat64LE = (bytes, val) => {
             const buf = new ArrayBuffer(8);
             new DataView(buf).setFloat64(0, val, true);
@@ -295,6 +291,13 @@ TODO:
             for (let b of u8) bytes.push(b);
         }
 
+        #readFloat32LE = (bytes, state) => {
+            if (state.i + 4 > bytes.length) throw new Error("Unexpected end of payload (float32).");
+            const tmp = new Uint8Array(bytes.slice(state.i, state.i + 4)).buffer;
+            const val = new DataView(tmp).getFloat32(0, true);
+            state.i += 4;
+            return val;
+        }
         #writeFloat32LE = (bytes, val) => {
             const buf = new ArrayBuffer(4);
             new DataView(buf).setFloat32(0, val, true);
@@ -302,6 +305,18 @@ TODO:
             for (let b of u8) bytes.push(b);
         }
 
+        #readULEB128 = (bytes, state) => {
+            let result = 0;
+            let shift = 0;
+            while (true) {
+                if (state.i >= bytes.length) throw new Error("Unexpected end of payload (uleb128).");
+                const b = bytes[state.i++];
+                result |= (b & 0x7F) << shift;
+                if (!(b & 0x80)) break;
+                shift += 7;
+            }
+            return result >>> 0;
+        }
         #writeULEB128 = (bytes, val) => {
             val = Math.max(0, Math.floor(val));
             while (val > 0x7F) {
@@ -312,6 +327,13 @@ TODO:
             bytes.push(val & 0x7F);
         }
 
+        #readColor = (bytes, state) => {
+            if (state.i + 3 > bytes.length) throw new Error("Unexpected end of payload (color).");
+            const r = bytes[state.i++];
+            const g = bytes[state.i++];
+            const b = bytes[state.i++];
+            return "#" + [r, g, b].map(x => x.toString(16).padStart(2, "0")).join("");
+        }
         #writeColor = (bytes, hex) => {
             let part = [0, 0, 0];
             if (hex) {
@@ -324,6 +346,13 @@ TODO:
             bytes.push(...part);
         }
 
+        #readString = (bytes, state) => {
+            const len = this.#readULEB128(bytes, state);
+            if (state.i + len > bytes.length) throw new Error("Unexpected end of payload (string).");
+            const slice = bytes.slice(state.i, state.i + len);
+            state.i += len;
+            return new Uint8Array(slice);
+        }
         #writeString = (bytes, strOrBytes) => {
             if (strOrBytes instanceof Uint8Array) {
                 this.#writeULEB128(bytes, strOrBytes.length);
@@ -337,14 +366,32 @@ TODO:
             for (const b of buf) bytes.push(b);
         }
 
-        #buildDrawPacket = (uuid, x, y, color, lineWidth, lifeMs, fadeMs) => {
+        #removeLinesByUuid = (uuid) => {
+            const hex = this.uuidToHex(uuid);
+            const removed = [];
+            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
+                const line = this.#lineBuffer[i];
+                const lineUuid = line.uuid;
+                const lineHex = (lineUuid instanceof Uint8Array) ? this.uuidToHex(lineUuid) : String(lineUuid);
+                if (lineHex === hex) {
+                    removed.push(lineUuid || uuid);
+                    this.#lineBuffer.splice(i, 1);
+                }
+            }
+            return Array.from(new Set(removed));
+        }
+
+        #buildDrawPacket = (uuid, x1, y1, x2, y2, color, lineWidth, lifeMs, fadeMs) => {
             const bytes = [];
             bytes.push(1);
             this.#writeString(bytes, uuid);
             this.#writeColor(bytes, color);
-            this.#writeFloat32LE(bytes, x);
-            this.#writeFloat32LE(bytes, y);
-            bytes.push(lineWidth & 0xFF);
+
+            this.#writeFloat32LE(bytes, x1);
+            this.#writeFloat32LE(bytes, y1);
+            this.#writeFloat32LE(bytes, x2);
+            this.#writeFloat32LE(bytes, y2);
+            this.#writeUint8(bytes, lineWidth);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
 
@@ -360,15 +407,17 @@ TODO:
         }
 
         #sendCustomData = (finalPayload) => {
-            if (MPP?.client?.sendArray) {
-                MPP.client.sendArray([{
-                    m: "custom",
-                    data: {
-                        drawboard: finalPayload
-                    },
-                    target: { mode: "subscribed" }
-                }]);
-            }
+            if (!MPP?.client?.sendArray || !Drawboard.connected) return;
+
+            MPP.client.sendArray([{
+                m: "custom",
+                data: {
+                    drawboard: finalPayload
+                },
+                target: {
+                    mode: "subscribed"
+                }
+            }]);
         }
 
         #updatePosition = () => {
@@ -419,17 +468,7 @@ TODO:
         }
 
         #draw = () => {
-            if (!this.#connected) {
-                if (MPP?.client?.sendArray) {
-                    MPP.client.sendArray([{
-                        m: "+custom"
-                    }]);
-                    this.#connected = true;
-                } else {
-                    return;
-                }
-            }
-            if (!this.#enabled) return;
+            if (!this.enabled || !Drawboard.connected) return;
 
             this.#clear();
             const now = Date.now();
@@ -509,7 +548,79 @@ TODO:
 
             return Array.from(new Set(removed));
         }
+
+        handleIncomingData = (payload) => {
+            console.log(payload);
+            if (!payload) return;
+
+            try {
+                const bytes = new Array(payload.length);
+                for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i);
+
+                const state = { i: 0 };
+                const opCount = this.#readULEB128(bytes, state);
+
+                for (let opIndex = 0; opIndex < opCount; opIndex++) {
+                    const type = this.#readUint8(bytes, state);
+                    if (type === 0) { // erase
+                        const uuidBytes = this.#readString(bytes, state);
+                        this.#removeLinesByUuid(uuidBytes);
+                    } else if (type === 1) { // draw
+                        const uuidBytes = this.#readString(bytes, state);
+                        const color = this.#readColor(bytes, state);
+                        const x1 = this.#readFloat32LE(bytes, state);
+                        const y1 = this.#readFloat32LE(bytes, state);
+                        const x2 = this.#readFloat32LE(bytes, state);
+                        const y2 = this.#readFloat32LE(bytes, state);
+                        const lineWidth = this.#readUint8(bytes, state);
+                        const lifeMs = this.#readULEB128(bytes, state);
+                        const fadeMs = this.#readULEB128(bytes, state);
+
+                        this.drawLine({
+                            x1, y1, x2, y2,
+                            color,
+                            lineWidth,
+                            lineLifeMs: lifeMs,
+                            lineFadeMs: fadeMs,
+                            uuid: uuidBytes
+                        });
+                    } else {
+                        console.warn("Unknown drawboard op type:", type);
+                        break;
+                    }
+                }
+            } catch (err) {
+                console.warn("Failed to parse incoming drawboard payload:", err);
+            }
+        }
     }
 
-    MPP.drawboard = new Drawboard();
+    async function run() {
+        MPP.drawboard = new Drawboard();
+
+        MPP.client.sendArray([{
+            m: "+custom"
+        }]);
+
+        if (MPP?.client?.on) {
+            MPP.client.on("custom", (packet) => {
+                if (!packet || !packet.data) return;
+                if (packet.data.drawboard) {
+                    MPP.drawboard.handleIncomingData(packet.data.drawboard);
+                }
+            });
+        }
+    }
+
+    function check() {
+        if (!Drawboard.connected) {
+            return setTimeout(() => {
+                check();
+            }, 200);
+        }
+
+        run();
+    }
+
+    check();
 })();
