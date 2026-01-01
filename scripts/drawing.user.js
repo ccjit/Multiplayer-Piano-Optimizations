@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.2
+// @version      2.0.3
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -41,41 +41,7 @@
 // @updateURL    https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.meta.js
 // ==/UserScript==
 
-/*
-    ### OP 0: Clear user
-    - <uint8 op>
-    1. Tells clients to clear this user's
-    lines
-
-    ### OP 1: Clear lines
-    - <uint8 op> <uleb128 length> <uint32 uuid>*
-    1. Tells clients to clear lines with
-    uuids provided
-
-    ### OP 2: Quick line
-    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
-    1. Tells clients to draw a line from
-    (x1, y1) to (x2, y2) with options and
-    provides a line uuid
-
-    ### OP 3: Start chain
-    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
-    1. Tells clients to set a point at
-    (x, y) to start a chain of lines with
-    options
-
-    ### OP 4: Continue chain
-    - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
-    1. Tells clients to continue off of
-    the user's chain to point (x, y) and
-    provides a line uuid (the (x, y) here
-    should after be set to (x1, y1) so that
-    the next continue will use that as the
-    start points, etc.)
-
-
-    * Denotes multiple allowed
-*/
+/* (header unchanged) */
 
 (async () => {
     const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
@@ -284,7 +250,11 @@
                     const start = this.#lastPosition;
                     const end = this.#position;
 
-                    this.#drawSegmentChain(start, end, {
+                    this.drawLine({
+                        x1: start.x,
+                        y1: start.y,
+                        x2: end.x,
+                        y2: end.y,
                         color: this.#color,
                         lineWidth: this.#lineWidth,
                         lineLifeMs: this.#lineLifeMs,
@@ -470,13 +440,13 @@
             return bytes;
         }
 
-        #buildQuickLinePacket = (colorHex, lineWidth, lifeMs, fadeMs, x1, y1, x2, y2, uuid) => {
+        #buildQuickLinePacket = (colorHex, lineWidth, lineLifeMs, lineFadeMs, x1, y1, x2, y2, uuid) => {
             const bytes = [];
             this.#writeUint8(bytes, 2);
             this.#writeColor(bytes, colorHex);
             this.#writeUint8(bytes, lineWidth & 0xFF);
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
             this.#writeUint16(bytes, x1 & 0xFFFF);
             this.#writeUint16(bytes, y1 & 0xFFFF);
             this.#writeUint16(bytes, x2 & 0xFFFF);
@@ -485,13 +455,13 @@
             return bytes;
         }
 
-        #buildStartChainPacket = (colorHex, lineWidth, lifeMs, fadeMs, x, y) => {
+        #buildStartChainPacket = (colorHex, lineWidth, lineLifeMs, lineFadeMs, x, y) => {
             const bytes = [];
             this.#writeUint8(bytes, 3);
             this.#writeColor(bytes, colorHex);
             this.#writeUint8(bytes, lineWidth & 0xFF);
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
             this.#writeUint16(bytes, x & 0xFFFF);
             this.#writeUint16(bytes, y & 0xFFFF);
             return bytes;
@@ -571,12 +541,12 @@
                         break;
                     }
                     case 2: {
-                        builtOps.push(this.#buildQuickLinePacket(item.color, item.lineWidth, item.lifeMs, item.fadeMs, item.x1u, item.y1u, item.x2u, item.y2u, item.uuid >>> 0));
+                        builtOps.push(this.#buildQuickLinePacket(item.color, item.lineWidth, item.lineLifeMs, item.lineFadeMs, item.x1u, item.y1u, item.x2u, item.y2u, item.uuid >>> 0));
                         i++;
                         break;
                     }
                     case 3: {
-                        builtOps.push(this.#buildStartChainPacket(item.color, item.lineWidth, item.lifeMs, item.fadeMs, item.xu, item.yu));
+                        builtOps.push(this.#buildStartChainPacket(item.color, item.lineWidth, item.lineLifeMs, item.lineFadeMs, item.xu, item.yu));
                         i++;
                         break;
                     }
@@ -672,52 +642,6 @@
             requestAnimationFrame(this.#draw);
         }
 
-        #drawSegmentChain = (startNormalized, endNormalized, opts) => {
-            const x1u = Math.round(Math.clamp(0, startNormalized.x, 1) * 65535);
-            const y1u = Math.round(Math.clamp(0, startNormalized.y, 1) * 65535);
-            const x2u = Math.round(Math.clamp(0, endNormalized.x, 1) * 65535);
-            const y2u = Math.round(Math.clamp(0, endNormalized.y, 1) * 65535);
-
-            const uuid = this.generateUUID();
-
-            this.renderLine({
-                x1: startNormalized.x,
-                y1: startNormalized.y,
-                x2: endNormalized.x,
-                y2: endNormalized.y,
-                color: opts.color,
-                lineWidth: opts.lineWidth,
-                lineLifeMs: opts.lineLifeMs,
-                lineFadeMs: opts.lineFadeMs,
-                uuid: uuid,
-                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
-            });
-
-            if (!this.#localChainStarted) {
-                this.#pushOp({
-                    op: 3,
-                    color: opts.color,
-                    lineWidth: opts.lineWidth,
-                    lifeMs: opts.lineLifeMs,
-                    fadeMs: opts.lineFadeMs,
-                    xu: x1u,
-                    yu: y1u
-                });
-                this.#localChainStarted = true;
-            }
-
-            this.#pushOp({
-                op: 4,
-                entries: [{ 
-                    x: x2u, 
-                    y: y2u, 
-                    uuid: uuid >>> 0
-                }]
-            });
-
-            return uuid;
-        }
-
         setLineSettings({ color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) {
             this.#color = color ?? this.#color;
             this.#lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
@@ -741,7 +665,7 @@
             return uuid >>> 0;
         }
 
-        drawLine = ({ x1, y1, x2, y2, color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
+        drawLine = ({ x1, y1, x2, y2, color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null, chain = true } = {}) => {
             color = color ?? this.#color;
             lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
             lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
@@ -767,20 +691,50 @@
                 owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
             });
 
-            const x1u = Math.round(nx1 * 65535);
-            const y1u = Math.round(ny1 * 65535);
-            const x2u = Math.round(nx2 * 65535);
-            const y2u = Math.round(ny2 * 65535);
+            // integer coordinate space used on-wire
+            const x1u = Math.round(nx1 * 65535) >>> 0;
+            const y1u = Math.round(ny1 * 65535) >>> 0;
+            const x2u = Math.round(nx2 * 65535) >>> 0;
+            const y2u = Math.round(ny2 * 65535) >>> 0;
 
-            this.#pushOp({
-                op: 2,
-                color: color,
-                lineWidth: lineWidth,
-                lineLifeMs: lineLifeMs,
-                lineFadeMs: lineFadeMs,
-                x1u: x1u, y1u: y1u, x2u: x2u, y2u: y2u,
-                uuid: uuid >>> 0
-            });
+            if (chain) {
+                // If chain hasn't started locally (this mouse drag), start with OP 3
+                if (!this.#localChainStarted) {
+                    this.#pushOp({
+                        op: 3,
+                        color: color,
+                        lineWidth: lineWidth,
+                        lineLifeMs: lineLifeMs,
+                        lineFadeMs: lineFadeMs,
+                        xu: x1u,
+                        yu: y1u
+                    });
+                    this.#localChainStarted = true;
+                }
+                // always push an OP 4 continuation entry
+                this.#pushOp({
+                    op: 4,
+                    entries: [{
+                        x: x2u & 0xFFFF,
+                        y: y2u & 0xFFFF,
+                        uuid: uuid >>> 0
+                    }]
+                });
+            } else {
+                // default: one-shot quick line (OP 2)
+                this.#pushOp({
+                    op: 2,
+                    color: color,
+                    lineWidth: lineWidth,
+                    lineLifeMs: lineLifeMs,
+                    lineFadeMs: lineFadeMs,
+                    x1u: x1u & 0xFFFF,
+                    y1u: y1u & 0xFFFF,
+                    x2u: x2u & 0xFFFF,
+                    y2u: y2u & 0xFFFF,
+                    uuid: uuid >>> 0
+                });
+            }
 
             return uuid >>> 0;
         }
@@ -814,8 +768,8 @@
                     op: 3,
                     color: this.#color,
                     lineWidth: this.#lineWidth,
-                    lifeMs: this.#lineLifeMs,
-                    fadeMs: this.#lineFadeMs,
+                    lineLifeMs: this.#lineLifeMs,
+                    lineFadeMs: this.#lineFadeMs,
                     xu: xu,
                     yu: yu
                 });
@@ -858,7 +812,7 @@
 
             const results = [];
             for (const s of segs) {
-                const id = this.drawLine({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 });
+                const id = this.drawLine({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, chain: false });
                 results.push(id);
             }
             return results;
@@ -959,8 +913,8 @@
                         case 2: {
                             const color = this.#readColor(bytes, state);
                             const lineWidth = this.#readUint8(bytes, state);
-                            const lifeMs = this.#readULEB128(bytes, state);
-                            const fadeMs = this.#readULEB128(bytes, state);
+                            const lineLifeMs = this.#readULEB128(bytes, state);
+                            const lineFadeMs = this.#readULEB128(bytes, state);
                             const x1u = this.#readUint16(bytes, state);
                             const y1u = this.#readUint16(bytes, state);
                             const x2u = this.#readUint16(bytes, state);
@@ -976,8 +930,8 @@
                                 x1, y1, x2, y2,
                                 color,
                                 lineWidth,
-                                lineLifeMs: lifeMs,
-                                lineFadeMs: fadeMs,
+                                lineLifeMs: lineLifeMs,
+                                lineFadeMs: lineFadeMs,
                                 uuid: uuid >>> 0,
                                 owner: senderId
                             });
@@ -986,8 +940,8 @@
                         case 3: {
                             const color = this.#readColor(bytes, state);
                             const lineWidth = this.#readUint8(bytes, state);
-                            const lifeMs = this.#readULEB128(bytes, state);
-                            const fadeMs = this.#readULEB128(bytes, state);
+                            const lineLifeMs = this.#readULEB128(bytes, state);
+                            const lineFadeMs = this.#readULEB128(bytes, state);
                             const xu = this.#readUint16(bytes, state);
                             const yu = this.#readUint16(bytes, state);
                             const entry = {
@@ -995,8 +949,8 @@
                                 y: yu >>> 0,
                                 color,
                                 lineWidth,
-                                lineLifeMs: lifeMs,
-                                lineFadeMs: fadeMs
+                                lineLifeMs: lineLifeMs,
+                                lineFadeMs: lineFadeMs
                             };
                             if (senderId) this.#chains.set(senderId, entry);
                             break;
