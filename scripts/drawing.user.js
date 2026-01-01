@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.4
+// @version      2.0.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -40,6 +40,42 @@
 // @downloadURL  https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.user.js
 // @updateURL    https://update.greasyfork.org/scripts/561021/Multiplayer%20Piano%20Optimizations%20%5BDrawing%5D.meta.js
 // ==/UserScript==
+
+/*
+    ### OP 0: Clear user
+    - <uint8 op>
+    1. Tells clients to clear this user's
+    lines
+
+    ### OP 1: Clear lines
+    - <uint8 op> <uleb128 length> <uint32 uuid>*
+    1. Tells clients to clear lines with
+    uuids provided
+
+    ### OP 2: Quick line
+    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
+    1. Tells clients to draw a line from
+    (x1, y1) to (x2, y2) with options and
+    provides a line uuid
+
+    ### OP 3: Start chain
+    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
+    1. Tells clients to set a point at
+    (x, y) to start a chain of lines with
+    options
+
+    ### OP 4: Continue chain
+    - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
+    1. Tells clients to continue off of
+    the user's chain to point (x, y) and
+    provides a line uuid (the (x, y) here
+    should after be set to (x1, y1) so that
+    the next continue will use that as the
+    start points, etc.)
+
+
+    * Denotes multiple allowed
+*/
 
 (async () => {
     const dl = GM_info.script.downloadURL || GM_info.script.updateURL || GM_info.script.homepageURL || "";
@@ -110,11 +146,15 @@
         #lineLifeMs = 5000;
         #lineFadeMs = 3000;
         #lineBuffer = [];
+        // now holds structured ops, not raw bytes
         #opBuffer = [];
         #payloadFlushMs = 200;
         #flushInterval;
         #mouseMoveThrottleMs = 50;
         #lastMouseMoveAt = 0;
+
+        #chains = new Map();
+        #localChainStarted = false;
 
         constructor() {
             this.#canvas = document.createElement("canvas");
@@ -171,6 +211,12 @@
         get lineFadeMs() {
             return this.#lineFadeMs;
         }
+        get mouseMoveThrottleMs() {
+            return this.#mouseMoveThrottleMs;
+        }
+        get payloadFlushMs() {
+            return this.#payloadFlushMs;
+        }
 
         set enabled(enabled) {
             this.#enabled = enabled;
@@ -190,10 +236,15 @@
         set lineFadeMs(lineFadeMs) {
             this.#lineFadeMs = lineFadeMs;
         }
-
-        get mouseMoveThrottleMs() {
-            return this.#mouseMoveThrottleMs;
+        set mouseMoveThrottleMs(mouseMoveThrottleMs) {
+            this.#mouseMoveThrottleMs = mouseMoveThrottleMs;
         }
+        set payloadFlushMs(payloadFlushMs) {
+            clearInterval(this.#flushInterval);
+            this.#payloadFlushMs = payloadFlushMs;
+            this.#flushInterval = setInterval(this.#flushOpBuffer, this.#payloadFlushMs);
+        }
+
 
         #resize = () => {
             this.#canvas.width = window.innerWidth;
@@ -213,6 +264,8 @@
             document.addEventListener("mousedown", (e) => {
                 this.#updatePosition();
                 this.#clicking = true;
+                this.#localChainStarted = false;
+
                 if ((this.#isShiftDown || this.#isCtrlDown) && this.#clicking) {
                     e.preventDefault();
                 }
@@ -232,27 +285,34 @@
                 if (this.#isShiftDown && this.#clicking) {
                     this.#updateValues();
 
-                    this.drawLine({
-                        x1: this.#lastPosition.x,
-                        y1: this.#lastPosition.y,
-                        x2: this.#position.x,
-                        y2: this.#position.y,
+                    const start = this.#lastPosition;
+                    const end = this.#position;
+
+                    this.#drawSegmentChain(start, end, {
                         color: this.#color,
                         lineWidth: this.#lineWidth,
                         lineLifeMs: this.#lineLifeMs,
-                        lineFadeMs: this.#lineFadeMs,
-                        uuid: this.generateUUID()
+                        lineFadeMs: this.#lineFadeMs
                     });
+
+                    this.#lastPosition = this.#position;
                 } else if (this.#isCtrlDown && this.#clicking) {
                     this.#updateValues();
                     const maxDim = Math.max(this.#canvas.width, this.#canvas.height) || 1;
                     const radius = this.#lineWidth * this.#eraseFactor / maxDim;
 
-                    this.erase({
+                    const removedUUIDs = this.erase({
                         x: this.#position.x,
                         y: this.#position.y,
                         radius: radius
                     });
+
+                    if (removedUUIDs && removedUUIDs.length) {
+                        this.#pushOp({
+                            op: 1,
+                            uuids: removedUUIDs.map(n => Number(n) >>> 0)
+                        });
+                    }
                 }
             });
 
@@ -272,32 +332,26 @@
             bytes.push(val & 0xFF);
         }
 
-        #readFloat64LE = (bytes, state) => {
-            if (state.i + 8 > bytes.length) throw new Error("Unexpected end of payload (float64).");
-            const tmp = new Uint8Array(bytes.slice(state.i, state.i + 8)).buffer;
-            const val = new DataView(tmp).getFloat64(0, true);
-            state.i += 8;
-            return val;
+        #readUint16 = (bytes, state) => {
+            if (state.i + 2 > bytes.length) throw new Error("Unexpected end of payload (uint16).");
+            const v = bytes[state.i] | (bytes[state.i + 1] << 8);
+            state.i += 2;
+            return v >>> 0;
         }
-        #writeFloat64LE = (bytes, val) => {
-            const buf = new ArrayBuffer(8);
-            new DataView(buf).setFloat64(0, val, true);
-            const u8 = new Uint8Array(buf);
-            for (let b of u8) bytes.push(b);
+        #writeUint16 = (bytes, val) => {
+            const v = val >>> 0;
+            bytes.push(v & 0xFF, (v >>> 8) & 0xFF);
         }
 
-        #readFloat32LE = (bytes, state) => {
-            if (state.i + 4 > bytes.length) throw new Error("Unexpected end of payload (float32).");
-            const tmp = new Uint8Array(bytes.slice(state.i, state.i + 4)).buffer;
-            const val = new DataView(tmp).getFloat32(0, true);
+        #readUint32 = (bytes, state) => {
+            if (state.i + 4 > bytes.length) throw new Error("Unexpected end of payload (uint32).");
+            const v = (bytes[state.i] | (bytes[state.i + 1] << 8) | (bytes[state.i + 2] << 16) | (bytes[state.i + 3] << 24)) >>> 0;
             state.i += 4;
-            return val;
+            return v;
         }
-        #writeFloat32LE = (bytes, val) => {
-            const buf = new ArrayBuffer(4);
-            new DataView(buf).setFloat32(0, val, true);
-            const u8 = new Uint8Array(buf);
-            for (let b of u8) bytes.push(b);
+        #writeUint32 = (bytes, val) => {
+            const v = val >>> 0;
+            bytes.push(v & 0xFF, (v >>> 8) & 0xFF, (v >>> 16) & 0xFF, (v >>> 24) & 0xFF);
         }
 
         #readULEB128 = (bytes, state) => {
@@ -361,43 +415,99 @@
             for (const b of buf) bytes.push(b);
         }
 
-        #removeLinesByUUID = (uuid) => {
-            const hex = this.uuidToHex(uuid);
+        generateUUID = () => {
+            let id = 0;
+            if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+                const arr = new Uint32Array(1);
+                crypto.getRandomValues(arr);
+                id = arr[0] >>> 0;
+            } else {
+                id = Math.floor(Math.random() * 0xFFFFFFFF) >>> 0;
+            }
+            if (id === 0) id = 1;
+            return id >>> 0;
+        }
+
+        #removeLinesByUUIDs = (uuids) => {
             const removed = [];
+            const set = new Set(uuids.map(n => Number(n)));
             for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
                 const line = this.#lineBuffer[i];
-                const lineUUID = line.uuid;
-                const lineHex = (lineUUID instanceof Uint8Array) ? this.uuidToHex(lineUUID) : String(lineUUID);
-                if (lineHex === hex) {
-                    removed.push(lineUUID || uuid);
+                if (set.has(Number(line.uuid))) {
+                    removed.push(line.uuid);
                     this.#lineBuffer.splice(i, 1);
                 }
             }
             return Array.from(new Set(removed));
         }
 
-        #buildDrawPacket = (uuid, x1, y1, x2, y2, color, lineWidth, lifeMs, fadeMs) => {
+        #removeLinesByOwner = (ownerId) => {
+            const removed = [];
+            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
+                const line = this.#lineBuffer[i];
+                if (line.owner === ownerId) {
+                    if (line.uuid) removed.push(line.uuid);
+                    this.#lineBuffer.splice(i, 1);
+                }
+            }
+            this.#chains.delete(ownerId);
+            return Array.from(new Set(removed));
+        }
+
+        #pushOp = (opObj) => { // could do some stuff here but dont need to atm
+            this.#opBuffer.push(opObj);
+        }
+
+        #buildClearUserPacket = () => {
             const bytes = [];
-            bytes.push(1);
-            this.#writeString(bytes, uuid);
-            this.#writeColor(bytes, color);
-
-            this.#writeFloat32LE(bytes, x1);
-            this.#writeFloat32LE(bytes, y1);
-            this.#writeFloat32LE(bytes, x2);
-            this.#writeFloat32LE(bytes, y2);
-            this.#writeUint8(bytes, lineWidth);
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
-
+            this.#writeUint8(bytes, 0);
             return bytes;
         }
 
-        #buildErasePacket = (uuid) => {
+        #buildClearLinesPacket = (uuids) => {
             const bytes = [];
-            bytes.push(0);
-            this.#writeString(bytes, uuid);
+            this.#writeUint8(bytes, 1);
+            this.#writeULEB128(bytes, uuids.length);
+            for (const u of uuids) this.#writeUint32(bytes, Number(u) >>> 0);
+            return bytes;
+        }
 
+        #buildQuickLinePacket = (colorHex, lineWidth, lifeMs, fadeMs, x1, y1, x2, y2, uuid) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 2);
+            this.#writeColor(bytes, colorHex);
+            this.#writeUint8(bytes, lineWidth & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, x1 & 0xFFFF);
+            this.#writeUint16(bytes, y1 & 0xFFFF);
+            this.#writeUint16(bytes, x2 & 0xFFFF);
+            this.#writeUint16(bytes, y2 & 0xFFFF);
+            this.#writeUint32(bytes, uuid >>> 0);
+            return bytes;
+        }
+
+        #buildStartChainPacket = (colorHex, lineWidth, lifeMs, fadeMs, x, y) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 3);
+            this.#writeColor(bytes, colorHex);
+            this.#writeUint8(bytes, lineWidth & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, x & 0xFFFF);
+            this.#writeUint16(bytes, y & 0xFFFF);
+            return bytes;
+        }
+
+        #buildContinueChainPacket = (entries) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 4);
+            this.#writeULEB128(bytes, entries.length);
+            for (const e of entries) {
+                this.#writeUint16(bytes, e.x & 0xFFFF);
+                this.#writeUint16(bytes, e.y & 0xFFFF);
+                this.#writeUint32(bytes, e.uuid >>> 0);
+            }
             return bytes;
         }
 
@@ -419,18 +529,86 @@
             this.#lastPosition = this.#position;
             const participant = this.participant;
             this.#position = {
-                x: Math.clamp(0, participant.x, 100) / 100,
-                y: Math.clamp(0, participant.y, 100) / 100
+                x: Math.clamp(0, (participant?.x ?? 0), 100) / 100,
+                y: Math.clamp(0, (participant?.y ?? 0), 100) / 100
             };
         }
 
         #flushOpBuffer = () => {
             if (!this.#opBuffer.length) return;
 
+            const builtOps = [];
+            const buf = this.#opBuffer;
+            let i = 0;
+            while (i < buf.length) {
+                const item = buf[i];
+                if (!item || typeof item.op !== "number") {
+                    i++;
+                    continue;
+                }
+
+                switch (item.op) {
+                    case 0: {
+                        builtOps.push(this.#buildClearUserPacket());
+                        i++;
+                        break;
+                    }
+                    case 1: {
+                        const allU = [];
+                        let j = i;
+                        while (j < buf.length && buf[j] && buf[j].op === 1) {
+                            if (Array.isArray(buf[j].uuids)) allU.push(...buf[j].uuids.map(n => Number(n) >>> 0));
+                            j++;
+                        }
+                        const seen = new Set();
+                        const uniq = [];
+                        for (const u of allU) {
+                            if (!seen.has(u)) {
+                                seen.add(u);
+                                uniq.push(u);
+                            }
+                        }
+                        builtOps.push(this.#buildClearLinesPacket(uniq));
+                        i = j;
+                        break;
+                    }
+                    case 2: {
+                        builtOps.push(this.#buildQuickLinePacket(item.color, item.lineWidth, item.lifeMs, item.fadeMs, item.x1u, item.y1u, item.x2u, item.y2u, item.uuid >>> 0));
+                        i++;
+                        break;
+                    }
+                    case 3: {
+                        builtOps.push(this.#buildStartChainPacket(item.color, item.lineWidth, item.lifeMs, item.fadeMs, item.xu, item.yu));
+                        i++;
+                        break;
+                    }
+                    case 4: {
+                        const allEntries = [];
+                        let j = i;
+                        while (j < buf.length && buf[j] && buf[j].op === 4) {
+                            if (Array.isArray(buf[j].entries)) allEntries.push(...buf[j].entries.map(e => ({
+                                x: e.x & 0xFFFF,
+                                y: e.y & 0xFFFF,
+                                uuid: e.uuid >>> 0
+                            })));
+                            j++;
+                        }
+                        builtOps.push(this.#buildContinueChainPacket(allEntries));
+                        i = j;
+                        break;
+                    }
+                    default: {
+                        i++;
+                        break;
+                    }
+                }
+            }
+
+            // final payload
             const bytes = [];
-            this.#writeULEB128(bytes, this.#opBuffer.length);
-            for (const op of this.#opBuffer) {
-                for (const b of op) bytes.push(b);
+            this.#writeULEB128(bytes, builtOps.length);
+            for (const opBytes of builtOps) {
+                for (const b of opBytes) bytes.push(b);
             }
             const finalPayload = String.fromCharCode(...bytes);
             this.#sendCustomData(finalPayload);
@@ -439,7 +617,7 @@
 
         #updateValues = () => {
             const participant = this.participant;
-            this.#color = participant.color;
+            this.#color = participant?.color || this.#color;
         }
 
         #pointToSegmentDistance = (px, py, x1, y1, x2, y2) => {
@@ -501,67 +679,60 @@
             requestAnimationFrame(this.#draw);
         }
 
-        generateUUID = () => {
-            const arr = new Uint8Array(6);
-            if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-                crypto.getRandomValues(arr);
-            } else {
-                for (let i = 0; i < 6; i++) arr[i] = Math.floor(Math.random() * 256);
+        #drawSegmentChain = (startNormalized, endNormalized, opts) => {
+            const x1u = Math.round(Math.clamp(0, startNormalized.x, 1) * 65535);
+            const y1u = Math.round(Math.clamp(0, startNormalized.y, 1) * 65535);
+            const x2u = Math.round(Math.clamp(0, endNormalized.x, 1) * 65535);
+            const y2u = Math.round(Math.clamp(0, endNormalized.y, 1) * 65535);
+
+            const uuid = this.generateUUID();
+
+            this.renderLine({
+                x1: startNormalized.x,
+                y1: startNormalized.y,
+                x2: endNormalized.x,
+                y2: endNormalized.y,
+                color: opts.color,
+                lineWidth: opts.lineWidth,
+                lineLifeMs: opts.lineLifeMs,
+                lineFadeMs: opts.lineFadeMs,
+                uuid: uuid,
+                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+            });
+
+            if (!this.#localChainStarted) {
+                this.#pushOp({
+                    op: 3,
+                    color: opts.color,
+                    lineWidth: opts.lineWidth,
+                    lifeMs: opts.lineLifeMs,
+                    fadeMs: opts.lineFadeMs,
+                    xu: x1u,
+                    yu: y1u
+                });
+                this.#localChainStarted = true;
             }
-            return arr;
+
+            this.#pushOp({
+                op: 4,
+                entries: [{ 
+                    x: x2u, 
+                    y: y2u, 
+                    uuid: uuid >>> 0
+                }]
+            });
+
+            return uuid;
         }
 
-        uuidToHex = (u8) => {
-            if (!(u8 instanceof Uint8Array)) return String(u8);
-            return Array.from(u8).map(b => b.toString(16).padStart(2, "0")).join("");
+        setLineSettings({ color = undefined, lineWidth = undefined, lineLifeMs = undefined, lineFadeMs = undefined } = {}) {
+            if (color !== undefined) this.#color = String(color);
+            if (lineWidth !== undefined) this.#lineWidth = Number(lineWidth) || this.#lineWidth;
+            if (lineLifeMs !== undefined) this.#lineLifeMs = Number(lineLifeMs) || this.#lineLifeMs;
+            if (lineFadeMs !== undefined) this.#lineFadeMs = Number(lineFadeMs) || this.#lineFadeMs;
         }
 
-        handleIncomingData = (payload) => {
-            // console.log(payload);
-            if (!payload) return;
-
-            try {
-                const bytes = new Array(payload.length);
-                for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i);
-
-                const state = { i: 0 };
-                const opCount = this.#readULEB128(bytes, state);
-
-                for (let opIndex = 0; opIndex < opCount; opIndex++) {
-                    const type = this.#readUint8(bytes, state);
-                    if (type === 0) { // erase
-                        const uuidBytes = this.#readString(bytes, state);
-                        this.#removeLinesByUUID(uuidBytes);
-                    } else if (type === 1) { // draw
-                        const uuidBytes = this.#readString(bytes, state);
-                        const color = this.#readColor(bytes, state);
-                        const x1 = this.#readFloat32LE(bytes, state);
-                        const y1 = this.#readFloat32LE(bytes, state);
-                        const x2 = this.#readFloat32LE(bytes, state);
-                        const y2 = this.#readFloat32LE(bytes, state);
-                        const lineWidth = this.#readUint8(bytes, state);
-                        const lifeMs = this.#readULEB128(bytes, state);
-                        const fadeMs = this.#readULEB128(bytes, state);
-
-                        this.renderLine({
-                            x1, y1, x2, y2,
-                            color,
-                            lineWidth,
-                            lineLifeMs: lifeMs,
-                            lineFadeMs: fadeMs,
-                            uuid: uuidBytes
-                        });
-                    } else {
-                        console.warn("Unknown drawboard op type:", type);
-                        break;
-                    }
-                }
-            } catch (err) {
-                console.warn("Failed to parse incoming drawboard payload:", err);
-            }
-        }
-
-        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID() }) {
+        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null }) {
             this.#lineBuffer.push({
                 x1, y1,
                 x2, y2,
@@ -570,27 +741,134 @@
                 lineLifeMs,
                 lineFadeMs,
                 timestamp: Date.now(),
-                uuid: uuid
+                uuid: uuid >>> 0,
+                owner: owner || null
             });
 
-            return uuid;
+            return uuid >>> 0;
         }
 
-        drawLine = ({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID() }) => {
-            this.renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid });
+        drawLine = ({ x1, y1, x2, y2, color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
+            const c = color ?? this.#color;
+            const lw = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
+            const life = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
+            const fade = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
 
-            const op = this.#buildDrawPacket(
-                uuid,
-                x1, y1,
-                x2, y2,
-                color,
-                lineWidth,
-                lineLifeMs,
-                lineFadeMs
-            );
-            this.#opBuffer.push(op);
+            const nx1 = Math.clamp(0, Number(x1) || 0, 1);
+            const ny1 = Math.clamp(0, Number(y1) || 0, 1);
+            const nx2 = Math.clamp(0, Number(x2) || 0, 1);
+            const ny2 = Math.clamp(0, Number(y2) || 0, 1);
 
-            return uuid;
+            const uuid = this.generateUUID();
+
+            this.renderLine({
+                x1: nx1,
+                y1: ny1,
+                x2: nx2,
+                y2: ny2,
+                color: c,
+                lineWidth: lw,
+                lineLifeMs: life,
+                lineFadeMs: fade,
+                uuid: uuid,
+                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+            });
+
+            const x1u = Math.round(nx1 * 65535);
+            const y1u = Math.round(ny1 * 65535);
+            const x2u = Math.round(nx2 * 65535);
+            const y2u = Math.round(ny2 * 65535);
+
+            this.#pushOp({
+                op: 2,
+                color: c,
+                lineWidth: lw,
+                lifeMs: life,
+                fadeMs: fade,
+                x1u: x1u, y1u: y1u, x2u: x2u, y2u: y2u,
+                uuid: uuid >>> 0
+            });
+
+            return uuid >>> 0;
+        }
+
+        drawLines = (segments = []) => {
+            if (!Array.isArray(segments) || !segments.length) return [];
+
+            const segs = segments.map(s => ({
+                x1: Math.clamp(0, Number(s.x1) || 0, 1),
+                y1: Math.clamp(0, Number(s.y1) || 0, 1),
+                x2: Math.clamp(0, Number(s.x2) || 0, 1),
+                y2: Math.clamp(0, Number(s.y2) || 0, 1)
+            }));
+
+            const eps = 1e-6;
+            const chainable = segs.length > 1 && (() => {
+                for (let i = 0; i < segs.length - 1; i++) {
+                    const a = segs[i], b = segs[i + 1];
+                    if (Math.abs(a.x2 - b.x1) > eps || Math.abs(a.y2 - b.y1) > eps) return false;
+                }
+                return true;
+            })();
+
+            if (chainable) {
+                const first = segs[0];
+
+                const xu = Math.round(first.x1 * 65535);
+                const yu = Math.round(first.y1 * 65535);
+
+                this.#pushOp({
+                    op: 3,
+                    color: this.#color,
+                    lineWidth: this.#lineWidth,
+                    lifeMs: this.#lineLifeMs,
+                    fadeMs: this.#lineFadeMs,
+                    xu: xu,
+                    yu: yu
+                });
+
+                const entries = [];
+                const uuids = [];
+
+                for (let i = 0; i < segs.length; i++) {
+                    const s = segs[i];
+                    const uuid = this.generateUUID() >>> 0;
+                    uuids.push(uuid);
+
+                    this.renderLine({
+                        x1: s.x1,
+                        y1: s.y1,
+                        x2: s.x2,
+                        y2: s.y2,
+                        color: this.#color,
+                        lineWidth: this.#lineWidth,
+                        lineLifeMs: this.#lineLifeMs,
+                        lineFadeMs: this.#lineFadeMs,
+                        uuid: uuid,
+                        owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+                    });
+
+                    entries.push({
+                        x: Math.round(s.x2 * 65535) & 0xFFFF,
+                        y: Math.round(s.y2 * 65535) & 0xFFFF,
+                        uuid: uuid >>> 0
+                    });
+                }
+
+                this.#pushOp({
+                    op: 4,
+                    entries: entries
+                });
+
+                return uuids;
+            }
+
+            const results = [];
+            for (const s of segs) {
+                const id = this.drawLine({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2 });
+                results.push(id);
+            }
+            return results;
         }
 
         renderErase({ x, y, radius }) {
@@ -611,12 +889,190 @@
 
         erase = ({ x, y, radius }) => {
             const removedUUIDs = this.renderErase({ x, y, radius });
-            for (const uuid of removedUUIDs) {
-                const op = this.#buildErasePacket(uuid);
-                this.#opBuffer.push(op);
-            }
-
             return removedUUIDs;
+        }
+
+        eraseLine({ uuid } = {}) {
+            if (uuid == null) return [];
+            const u = Number(uuid) >>> 0;
+
+            const removed = this.#removeLinesByUUIDs([u]);
+            if (removed && removed.length) {
+                this.#pushOp({ op: 1, uuids: removed.map(n => Number(n) >>> 0) });
+            } else {
+                this.#pushOp({ op: 1, uuids: [u] });
+            }
+            return removed;
+        }
+
+        eraseLines(uuids = []) {
+            if (!Array.isArray(uuids) || !uuids.length) return [];
+            const clean = Array.from(new Set(uuids.map(n => Number(n) >>> 0)));
+            const removed = this.#removeLinesByUUIDs(clean);
+            if (removed && removed.length) {
+                this.#pushOp({ op: 1, uuids: removed.map(n => Number(n) >>> 0) });
+            } else {
+                this.#pushOp({ op: 1, uuids: clean });
+            }
+            return removed;
+        }
+
+        eraseAll() {
+            const ownerId = (MPP.client.user?.id ?? MPP.client.getOwnParticipant?.()?.id ?? null);
+            const ownerStr = ownerId !== null ? String(ownerId) : null;
+            if (ownerStr !== null) {
+                this.#removeLinesByOwner(ownerStr);
+            } else {
+                this.#lineBuffer.length = 0;
+            }
+            this.#pushOp({ op: 0 });
+        }
+
+        handleIncomingData = (packet) => {
+            if (!packet?.data?.drawboard) return;
+            const payload = packet.data.drawboard;
+
+            try {
+                const bytes = new Array(payload.length);
+                for (let i = 0; i < payload.length; i++) bytes[i] = payload.charCodeAt(i);
+
+                const state = { i: 0 };
+                const opCount = this.#readULEB128(bytes, state);
+
+                const senderId = (packet && packet.p) ? String(packet.p) : null;
+
+                for (let opIndex = 0; opIndex < opCount; opIndex++) {
+                    const type = this.#readUint8(bytes, state);
+
+                    switch (type) {
+                        case 0: {
+                            if (!senderId) {
+                                console.warn("Clear user received but no sender provided.");
+                            } else {
+                                this.#removeLinesByOwner(senderId);
+                            }
+                            break;
+                        }
+                        case 1: {
+                            const len = this.#readULEB128(bytes, state);
+                            const uuids = [];
+                            for (let k = 0; k < len; k++) {
+                                const u = this.#readUint32(bytes, state);
+                                uuids.push(u >>> 0);
+                            }
+                            this.#removeLinesByUUIDs(uuids);
+                            break;
+                        }
+                        case 2: {
+                            const color = this.#readColor(bytes, state);
+                            const lineWidth = this.#readUint8(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const x1u = this.#readUint16(bytes, state);
+                            const y1u = this.#readUint16(bytes, state);
+                            const x2u = this.#readUint16(bytes, state);
+                            const y2u = this.#readUint16(bytes, state);
+                            const uuid = this.#readUint32(bytes, state);
+
+                            const x1 = Math.clamp(0, x1u / 65535, 1);
+                            const y1 = Math.clamp(0, y1u / 65535, 1);
+                            const x2 = Math.clamp(0, x2u / 65535, 1);
+                            const y2 = Math.clamp(0, y2u / 65535, 1);
+
+                            this.renderLine({
+                                x1, y1, x2, y2,
+                                color,
+                                lineWidth,
+                                lineLifeMs: lifeMs,
+                                lineFadeMs: fadeMs,
+                                uuid: uuid >>> 0,
+                                owner: senderId
+                            });
+                            break;
+                        }
+                        case 3: {
+                            const color = this.#readColor(bytes, state);
+                            const lineWidth = this.#readUint8(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const xu = this.#readUint16(bytes, state);
+                            const yu = this.#readUint16(bytes, state);
+                            const entry = {
+                                x: xu >>> 0,
+                                y: yu >>> 0,
+                                color,
+                                lineWidth,
+                                lineLifeMs: lifeMs,
+                                lineFadeMs: fadeMs
+                            };
+                            if (senderId) this.#chains.set(senderId, entry);
+                            break;
+                        }
+                        case 4: {
+                            const len = this.#readULEB128(bytes, state);
+                            if (!senderId) {
+                                for (let k = 0; k < len; k++) {
+                                    const xu = this.#readUint16(bytes, state);
+                                    const yu = this.#readUint16(bytes, state);
+                                    const uuid = this.#readUint32(bytes, state);
+                                    // no sender ... ignore for now
+                                }
+                            } else {
+                                let chain = this.#chains.get(senderId);
+                                for (let k = 0; k < len; k++) {
+                                    const xu = this.#readUint16(bytes, state);
+                                    const yu = this.#readUint16(bytes, state);
+                                    const uuid = this.#readUint32(bytes, state);
+
+                                    const x = xu >>> 0;
+                                    const y = yu >>> 0;
+                                    if (!chain) {
+                                        chain = {
+                                            x,
+                                            y,
+                                            color: "#000000",
+                                            lineWidth: 3,
+                                            lineLifeMs: 5000,
+                                            lineFadeMs: 3000
+                                        };
+                                        this.#chains.set(senderId, chain);
+                                        continue;
+                                    }
+
+                                    const x1n = Math.clamp(0, chain.x / 65535, 1);
+                                    const y1n = Math.clamp(0, chain.y / 65535, 1);
+                                    const x2n = Math.clamp(0, x / 65535, 1);
+                                    const y2n = Math.clamp(0, y / 65535, 1);
+
+                                    this.renderLine({
+                                        x1: x1n,
+                                        y1: y1n,
+                                        x2: x2n,
+                                        y2: y2n,
+                                        color: chain.color,
+                                        lineWidth: chain.lineWidth,
+                                        lineLifeMs: chain.lineLifeMs,
+                                        lineFadeMs: chain.lineFadeMs,
+                                        uuid: uuid >>> 0,
+                                        owner: senderId
+                                    });
+
+                                    chain.x = x;
+                                    chain.y = y;
+                                }
+                                this.#chains.set(senderId, chain);
+                            }
+                            break;
+                        }
+                        default: {
+                            console.warn("Unknown drawboard op type:", type);
+                            break;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn("Failed to parse incoming drawboard payload:", err);
+            }
         }
     }
 
@@ -631,7 +1087,7 @@
             MPP.client.on("custom", (packet) => {
                 if (!packet || !packet.data) return;
                 if (packet.data.drawboard) {
-                    MPP.drawboard.handleIncomingData(packet.data.drawboard);
+                    MPP.drawboard.handleIncomingData(packet);
                 }
             });
         }
