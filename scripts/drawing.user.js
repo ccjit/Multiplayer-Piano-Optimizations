@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.0
+// @version      2.0.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -649,19 +649,19 @@
                 const line = this.#lineBuffer[i];
 
                 const timestamp = line.timestamp || 0;
-                const life = line.lineLifeMs;
-                const fade = line.lineFadeMs;
+                const lineLifeMs = line.lineLifeMs;
+                const lineFadeMs = line.lineFadeMs;
                 const age = now - timestamp;
 
-                if (age >= life + fade) {
+                if (age >= lineLifeMs + lineFadeMs) {
                     this.#lineBuffer.splice(i, 1);
                     continue;
                 }
 
                 let alpha = 1;
-                if (age > life) {
-                    const fadeAge = age - life;
-                    alpha = Math.clamp(0, 1 - (fadeAge / fade), 1);
+                if (age > lineLifeMs) {
+                    const fadeAge = age - lineLifeMs;
+                    alpha = Math.clamp(0, 1 - (fadeAge / lineFadeMs), 1);
                 }
 
                 this.#ctx.globalAlpha = alpha;
@@ -725,11 +725,11 @@
             return uuid;
         }
 
-        setLineSettings({ color = undefined, lineWidth = undefined, lineLifeMs = undefined, lineFadeMs = undefined } = {}) {
-            if (color !== undefined) this.#color = String(color);
-            if (lineWidth !== undefined) this.#lineWidth = Number(lineWidth) || this.#lineWidth;
-            if (lineLifeMs !== undefined) this.#lineLifeMs = Number(lineLifeMs) || this.#lineLifeMs;
-            if (lineFadeMs !== undefined) this.#lineFadeMs = Number(lineFadeMs) || this.#lineFadeMs;
+        setLineSettings({ color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) {
+            this.#color = color ?? this.#color;
+            this.#lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
+            this.#lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
+            this.#lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
         }
 
         renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null }) {
@@ -749,10 +749,10 @@
         }
 
         drawLine = ({ x1, y1, x2, y2, color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
-            const c = color ?? this.#color;
-            const lw = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
-            const life = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
-            const fade = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
+            color = color ?? this.#color;
+            lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
+            lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
+            lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
 
             const nx1 = Math.clamp(0, Number(x1) || 0, 1);
             const ny1 = Math.clamp(0, Number(y1) || 0, 1);
@@ -766,10 +766,10 @@
                 y1: ny1,
                 x2: nx2,
                 y2: ny2,
-                color: c,
-                lineWidth: lw,
-                lineLifeMs: life,
-                lineFadeMs: fade,
+                color: color,
+                lineWidth: lineWidth,
+                lineLifeMs: lineLifeMs,
+                lineFadeMs: lineFadeMs,
                 uuid: uuid,
                 owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
             });
@@ -781,10 +781,10 @@
 
             this.#pushOp({
                 op: 2,
-                color: c,
-                lineWidth: lw,
-                lifeMs: life,
-                fadeMs: fade,
+                color: color,
+                lineWidth: lineWidth,
+                lineLifeMs: lineLifeMs,
+                lineFadeMs: lineFadeMs,
                 x1u: x1u, y1u: y1u, x2u: x2u, y2u: y2u,
                 uuid: uuid >>> 0
             });
