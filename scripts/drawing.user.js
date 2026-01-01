@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      1.0.3
+// @version      1.0.4
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -113,6 +113,8 @@
         #opBuffer = [];
         #payloadFlushMs = 200;
         #flushInterval;
+        #mouseMoveThrottleMs = 50;
+        #lastMouseMoveAt = 0;
 
         constructor() {
             this.#canvas = document.createElement("canvas");
@@ -189,6 +191,10 @@
             this.#lineFadeMs = lineFadeMs;
         }
 
+        get mouseMoveThrottleMs() {
+            return this.#mouseMoveThrottleMs;
+        }
+
         #resize = () => {
             this.#canvas.width = window.innerWidth;
             this.#canvas.height = window.innerHeight;
@@ -217,6 +223,10 @@
                 this.#flushOpBuffer();
             });
             document.addEventListener("mousemove", (e) => {
+                const now = Date.now();
+                if (now - this.#lastMouseMoveAt < this.#mouseMoveThrottleMs) return;
+                this.#lastMouseMoveAt = now;
+
                 this.#updatePosition();
                 if (!this.#lastPosition) this.#lastPosition = this.#position;
                 if (this.#isShiftDown && this.#clicking) {
