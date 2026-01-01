@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.3
+// @version      2.0.4
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -479,13 +479,13 @@
             return bytes;
         }
 
-        #sendCustomData = (finalPayload) => {
+        #sendCustomData = (payload) => {
             if (!MPP?.client?.sendArray || !Drawboard.connected) return;
 
             MPP.client.sendArray([{
                 m: "custom",
                 data: {
-                    drawboard: finalPayload
+                    drawboard: btoa(payload)
                 },
                 target: {
                     mode: "subscribed"
@@ -691,14 +691,12 @@
                 owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
             });
 
-            // integer coordinate space used on-wire
             const x1u = Math.round(nx1 * 65535) >>> 0;
             const y1u = Math.round(ny1 * 65535) >>> 0;
             const x2u = Math.round(nx2 * 65535) >>> 0;
             const y2u = Math.round(ny2 * 65535) >>> 0;
 
             if (chain) {
-                // If chain hasn't started locally (this mouse drag), start with OP 3
                 if (!this.#localChainStarted) {
                     this.#pushOp({
                         op: 3,
@@ -711,7 +709,7 @@
                     });
                     this.#localChainStarted = true;
                 }
-                // always push an OP 4 continuation entry
+
                 this.#pushOp({
                     op: 4,
                     entries: [{
@@ -721,7 +719,6 @@
                     }]
                 });
             } else {
-                // default: one-shot quick line (OP 2)
                 this.#pushOp({
                     op: 2,
                     color: color,
@@ -877,7 +874,7 @@
 
         handleIncomingData = (packet) => {
             if (!packet?.data?.drawboard) return;
-            const payload = packet.data.drawboard;
+            const payload = atob(packet.data.drawboard);
 
             try {
                 const bytes = new Array(payload.length);
