@@ -22,3 +22,12 @@
 - Saves by device ID and by device name.
 - Re-applies saved states on device changes or reload.
 - Also found on [Greasy Fork](https://greasyfork.org/en/scripts/547863)
+
+### Drawing
+- Draw on the piano with others
+- Customize settings
+  - Color
+  - Line width
+  - Line lifetime
+  - Line fade time
+- Also found on [Greasy Fork](https://greasyfork.org/en/scripts/561021)
