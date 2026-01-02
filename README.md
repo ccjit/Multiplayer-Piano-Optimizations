@@ -25,9 +25,17 @@
 
 ### Drawing
 - Draw on the piano with others
+- Use **Shift** and drag to draw
+- Use **Ctrl** and drag to erase
 - Customize settings
   - Color
+  - Transparency
   - Line width
-  - Line lifetime
-  - Line fade time
+  - Lifetime
+  - Fade time
+- Many shape options
+  - Line
+  - Ellipse
+  - Triangle
+  - Text
 - Also found on [Greasy Fork](https://greasyfork.org/en/scripts/561021)
