@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.3.0
+// @version      2.4.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -161,6 +161,7 @@
         #fadeMs = 3000;
         #shapeBuffer = [];
         #opBuffer = [];
+        #drawingMutes = [];
         #payloadFlushMs = 200;
         #flushInterval;
         #mouseMoveThrottleMs = 50;
@@ -232,6 +233,9 @@
         get payloadFlushMs() {
             return this.#payloadFlushMs;
         }
+        get drawingMutes() {
+            return this.#drawingMutes;
+        }
 
         set enabled(enabled) {
             this.#enabled = enabled;
@@ -261,6 +265,10 @@
             clearInterval(this.#flushInterval);
             this.#payloadFlushMs = payloadFlushMs;
             this.#flushInterval = setInterval(this.#flushOpBuffer, this.#payloadFlushMs);
+        }
+        set drawingMutes(drawingMutes) {
+            this.#drawingMutes = drawingMutes;
+            this.#saveDrawingMutes();
         }
 
 
@@ -336,6 +344,40 @@
                 }
             });
 
+            const menuClassName = "participant-menu";
+            const observer = new MutationObserver((mutations) => {
+                mutations.forEach((mutation) => {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE && node.className === menuClassName) {
+                            const menu = document.querySelector(`.${menuClassName}`);
+
+                            const info = menu.querySelector("div.info");
+                            const targetId = info.textContent.trim();
+                            const muted = this.#drawingMutes.includes(targetId);
+
+                            const muteLinesButton = document.createElement("div");
+                            muteLinesButton.className = "menu-item";
+                            muteLinesButton.textContent = `${muted ? "Unhide" : "Hide"} Drawings`;
+                            menu.insertAdjacentElement("beforeend", muteLinesButton);
+
+                            muteLinesButton.addEventListener("click", (e) => {
+                                if (muted) {
+                                    this.#drawingMutes = this.#drawingMutes.filter(id => id !== targetId);
+                                } else {
+                                    this.#drawingMutes.push(targetId);
+                                }
+                                this.#saveDrawingMutes();
+                            });
+                        }
+                    });
+                });
+            });
+
+            observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+
             requestAnimationFrame(this.#draw);
             this.#flushInterval = setInterval(this.#flushOpBuffer, this.#payloadFlushMs);
 
@@ -345,6 +387,11 @@
 
             const participant = this.participant;
             if (participant?.color) this.#color = participant.color;
+            this.#drawingMutes = localStorage.drawingMutes.split(",");
+        }
+
+        #saveDrawingMutes = () => {
+            localStorage.drawingMutes = this.#drawingMutes.filter(id => id).join(",");
         }
 
         #readUint8 = (bytes, state) => {
@@ -812,7 +859,7 @@
                 const shape = this.#shapeBuffer[i];
                 const timestamp = shape.timestamp || 0;
                 const age = now - timestamp;
-                if (age < (shape.lifeMs + shape.fadeMs)) {
+                if (age < (shape.lifeMs + shape.fadeMs) && !this.#drawingMutes.includes(shape.owner)) {
                     kept.push(shape);
                 }
             }
@@ -1652,7 +1699,7 @@
                             break;
                         }
                         default: {
-                            console.warn("Unknown drawboard op type:", type);
+                            console.warn("Unknown drawboard op code:", type);
                             break;
                         }
                     }
