@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.5
+// @version      2.0.6
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -770,14 +770,18 @@
             return uuid >>> 0;
         }
 
-        drawLines = (segments = []) => {
+        drawLines = (segments = [], { color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
             if (!Array.isArray(segments) || !segments.length) return [];
 
             const segs = segments.map(s => ({
                 x1: Math.clamp(0, Number(s.x1) || 0, 1),
                 y1: Math.clamp(0, Number(s.y1) || 0, 1),
                 x2: Math.clamp(0, Number(s.x2) || 0, 1),
-                y2: Math.clamp(0, Number(s.y2) || 0, 1)
+                y2: Math.clamp(0, Number(s.y2) || 0, 1),
+                color: s.color ?? color,
+                lineWidth: Number.isFinite(s.lineWidth) ? s.lineWidth : lineWidth,
+                lineLifeMs: Number.isFinite(s.lineLifeMs) ? s.lineLifeMs : lineLifeMs,
+                lineFadeMs: Number.isFinite(s.lineFadeMs) ? s.lineFadeMs : lineFadeMs
             }));
 
             const eps = 1e-6;
@@ -791,16 +795,15 @@
 
             if (chainable) {
                 const first = segs[0];
-
                 const xu = Math.round(first.x1 * 65535);
                 const yu = Math.round(first.y1 * 65535);
 
                 this.#pushOp({
                     op: 3,
-                    color: this.#color,
-                    lineWidth: this.#lineWidth,
-                    lineLifeMs: this.#lineLifeMs,
-                    lineFadeMs: this.#lineFadeMs,
+                    color: first.color ?? this.#color,
+                    lineWidth: first.lineWidth ?? this.#lineWidth,
+                    lineLifeMs: first.lineLifeMs ?? this.#lineLifeMs,
+                    lineFadeMs: first.lineFadeMs ?? this.#lineFadeMs,
                     xu: xu,
                     yu: yu
                 });
@@ -808,8 +811,7 @@
                 const entries = [];
                 const uuids = [];
 
-                for (let i = 0; i < segs.length; i++) {
-                    const s = segs[i];
+                for (const s of segs) {
                     const uuid = this.generateUUID() >>> 0;
                     uuids.push(uuid);
 
@@ -818,10 +820,10 @@
                         y1: s.y1,
                         x2: s.x2,
                         y2: s.y2,
-                        color: this.#color,
-                        lineWidth: this.#lineWidth,
-                        lineLifeMs: this.#lineLifeMs,
-                        lineFadeMs: this.#lineFadeMs,
+                        color: s.color ?? this.#color,
+                        lineWidth: s.lineWidth ?? this.#lineWidth,
+                        lineLifeMs: s.lineLifeMs ?? this.#lineLifeMs,
+                        lineFadeMs: s.lineFadeMs ?? this.#lineFadeMs,
                         uuid: uuid,
                         owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
                     });
@@ -843,7 +845,17 @@
 
             const results = [];
             for (const s of segs) {
-                const id = this.drawLine({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, chain: false });
+                const id = this.drawLine({
+                    x1: s.x1,
+                    y1: s.y1,
+                    x2: s.x2,
+                    y2: s.y2,
+                    color: s.color ?? color,
+                    lineWidth: s.lineWidth ?? lineWidth,
+                    lineLifeMs: s.lineLifeMs ?? lineLifeMs,
+                    lineFadeMs: s.lineFadeMs ?? lineFadeMs,
+                    chain: false
+                });
                 results.push(id);
             }
             return results;
