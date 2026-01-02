@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.4.0
+// @version      2.4.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -387,7 +387,8 @@
 
             const participant = this.participant;
             if (participant?.color) this.#color = participant.color;
-            this.#drawingMutes = localStorage.drawingMutes.split(",");
+            this.#drawingMutes = localStorage.drawingMutes?.split(",") ?? [];
+            this.#saveDrawingMutes();
         }
 
         #saveDrawingMutes = () => {
