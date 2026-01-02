@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.2.0
+// @version      2.3.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -75,6 +75,16 @@
     1. Tells clients to draw a filled triangle
     with the provided vertices and options,
     and provides a shape uuid.
+
+    ### OP 6: Stroked ellipse
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 cx> <uint16 cy> <uint16 rx> <uint16 ry> <uint32 uuid>
+    1. Tells clients to draw a stroked ellipse
+    at center (cx, cy) with radii (rx, ry)
+
+    ### OP 7: Filled ellipse
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 cx> <uint16 cy> <uint16 rx> <uint16 ry> <uint32 uuid>
+    1. Tells clients to draw a filled ellipse
+    at center (cx, cy) with radii (rx, ry)
 
     strings are prefixed with <uleb128 length>
     * Denotes multiple allowed
@@ -441,7 +451,7 @@
             return id >>> 0;
         }
 
-        #removeLinesByUUIDs = (uuids) => {
+        #removeShapesByUUIDs = (uuids) => {
             const removed = [];
             const set = new Set(uuids.map(n => Number(n)));
             for (let i = this.#shapeBuffer.length - 1; i >= 0; i--) {
@@ -539,6 +549,37 @@
             this.#writeUint16(bytes, y2 & 0xFFFF);
             this.#writeUint16(bytes, x3 & 0xFFFF);
             this.#writeUint16(bytes, y3 & 0xFFFF);
+            this.#writeUint32(bytes, uuid >>> 0);
+            return bytes;
+        }
+
+        #buildEllipseStrokePacket = (color, transparency, lineWidth, lifeMs, fadeMs, cx, cy, rx, ry, uuid) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 6);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, cx & 0xFFFF);
+            this.#writeUint16(bytes, cy & 0xFFFF);
+            this.#writeUint16(bytes, rx & 0xFFFF);
+            this.#writeUint16(bytes, ry & 0xFFFF);
+            this.#writeUint32(bytes, uuid >>> 0);
+            return bytes;
+        }
+
+        #buildEllipseFillPacket = (color, transparency, lifeMs, fadeMs, cx, cy, rx, ry, uuid) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 7);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, cx & 0xFFFF);
+            this.#writeUint16(bytes, cy & 0xFFFF);
+            this.#writeUint16(bytes, rx & 0xFFFF);
+            this.#writeUint16(bytes, ry & 0xFFFF);
             this.#writeUint32(bytes, uuid >>> 0);
             return bytes;
         }
@@ -665,6 +706,37 @@
                         i++;
                         break;
                     }
+                    case 6: {
+                        builtOps.push(this.#buildEllipseStrokePacket(
+                            item.color,
+                            item.transparency,
+                            item.lineWidth,
+                            item.lifeMs,
+                            item.fadeMs,
+                            item.cxu,
+                            item.cyu,
+                            item.rxu,
+                            item.ryu,
+                            item.uuid >>> 0
+                        ));
+                        i++;
+                        break;
+                    }
+                    case 7: {
+                        builtOps.push(this.#buildEllipseFillPacket(
+                            item.color,
+                            item.transparency,
+                            item.lifeMs,
+                            item.fadeMs,
+                            item.cxu,
+                            item.cyu,
+                            item.rxu,
+                            item.ryu,
+                            item.uuid >>> 0
+                        ));
+                        i++;
+                        break;
+                    }
                     default: {
                         i++;
                         break;
@@ -783,6 +855,35 @@
                         this.#ctx.fill();
                         break;
                     }
+                    case "ellipse": {
+                        this.#ctx.globalCompositeOperation = "source-over";
+
+                        const cx = shape.cx * this.#canvas.width;
+                        const cy = shape.cy * this.#canvas.height;
+                        const rx = shape.rx * this.#canvas.width;
+                        const ry = shape.ry * this.#canvas.height;
+                        this.#ctx.beginPath();
+
+                        this.#ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+                        switch (shape.subType) {
+                            case "fill": {
+                                this.#ctx.fillStyle = shape.color;
+                                this.#ctx.fill();
+                                break;
+                            }
+                            case "stroke": {
+                                this.#ctx.strokeStyle = shape.color;
+                                this.#ctx.lineWidth = shape.lineWidth;
+                                this.#ctx.stroke();
+                                break;
+                            }
+                            default: {
+                                console.warn("Unknown drawboard shape subtype:", shape.subType);
+                                break;
+                            }
+                        }
+                        break;
+                    }
                     default: {
                         console.warn("Unknown drawboard shape type:", shape.type);
                         break;
@@ -846,7 +947,7 @@
                 lifeMs: lifeMs,
                 fadeMs: fadeMs,
                 uuid: uuid,
-                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+                owner: MPP?.client?.participantId || null
             });
 
             const x1u = Math.round(nx1 * 65535) >>> 0;
@@ -954,7 +1055,7 @@
                         lifeMs: s.lifeMs ?? this.#lifeMs,
                         fadeMs: s.fadeMs ?? this.#fadeMs,
                         uuid: uuid,
-                        owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+                        owner: MPP?.client?.participantId || null
                     });
 
                     entries.push({
@@ -1036,7 +1137,7 @@
                 lifeMs: lifeMs,
                 fadeMs: fadeMs,
                 uuid: uuid,
-                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+                owner: MPP?.client?.participantId || null
             });
 
             const x1u = Math.round(nx1 * 65535) >>> 0;
@@ -1086,6 +1187,112 @@
             return results;
         }
 
+        renderEllipse = ({ cx, cy, rx, ry, color, transparency, lineWidth = 1, lifeMs, fadeMs, subType = "fill", uuid = this.generateUUID(), owner = null } = {}) => {
+            const shape = {
+                type: "ellipse",
+                subType,
+                cx, cy,
+                rx, ry,
+                color,
+                transparency: Math.clamp(0, transparency, 1),
+                lineWidth,
+                lifeMs,
+                fadeMs,
+                timestamp: Date.now(),
+                uuid: uuid >>> 0,
+                owner: owner || null
+            };
+            this.#shapeBuffer.push(shape);
+            return uuid >>> 0;
+        }
+
+        drawEllipse = ({ cx, cy, rx, ry, color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null, fill = true } = {}) => {
+            color = color ?? this.#color;
+            transparency = transparency ?? this.#transparency;
+            lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
+            lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
+            fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
+
+            const ncx = Math.clamp(0, Number(cx) || 0, 1);
+            const ncy = Math.clamp(0, Number(cy) || 0, 1);
+            const nrx = Math.clamp(0, Number(rx) || 0, 1);
+            const nry = Math.clamp(0, Number(ry) || 0, 1);
+
+            const uuid = this.generateUUID();
+
+            this.renderEllipse({
+                cx: ncx,
+                cy: ncy,
+                rx: nrx,
+                ry: nry,
+                color: color,
+                transparency: transparency,
+                lineWidth: lineWidth,
+                lifeMs: lifeMs,
+                fadeMs: fadeMs,
+                subType: fill ? "fill" : "stroke",
+                uuid: uuid,
+                owner: MPP?.client?.participantId || null
+            });
+
+            const cxu = Math.round(ncx * 65535) >>> 0;
+            const cyu = Math.round(ncy * 65535) >>> 0;
+            const rxu = Math.round(nrx * 65535) >>> 0;
+            const ryu = Math.round(nry * 65535) >>> 0;
+
+            if (fill) {
+                this.#pushOp({
+                    op: 7,
+                    color: color,
+                    transparency: transparency,
+                    lifeMs: lifeMs,
+                    fadeMs: fadeMs,
+                    cxu: cxu & 0xFFFF,
+                    cyu: cyu & 0xFFFF,
+                    rxu: rxu & 0xFFFF,
+                    ryu: ryu & 0xFFFF,
+                    uuid: uuid >>> 0
+                });
+            } else {
+                this.#pushOp({
+                    op: 6,
+                    color: color,
+                    transparency: transparency,
+                    lineWidth: lineWidth,
+                    lifeMs: lifeMs,
+                    fadeMs: fadeMs,
+                    cxu: cxu & 0xFFFF,
+                    cyu: cyu & 0xFFFF,
+                    rxu: rxu & 0xFFFF,
+                    ryu: ryu & 0xFFFF,
+                    uuid: uuid >>> 0
+                });
+            }
+
+            return uuid >>> 0;
+        }
+
+        drawEllipses = (ellipses = [], { color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null } = {}) => {
+            if (!Array.isArray(ellipses) || !ellipses.length) return [];
+            const results = [];
+            for (const e of ellipses) {
+                const id = this.drawEllipse({
+                    cx: Math.clamp(0, Number(e.cx) || 0, 1),
+                    cy: Math.clamp(0, Number(e.cy) || 0, 1),
+                    rx: Math.clamp(0, Number(e.rx) || 0, 1),
+                    ry: Math.clamp(0, Number(e.ry) || 0, 1),
+                    color: e.color ?? color,
+                    transparency: e.transparency ?? transparency,
+                    lineWidth: Number.isFinite(e.lineWidth) ? e.lineWidth : lineWidth,
+                    lifeMs: Number.isFinite(e.lifeMs) ? e.lifeMs : lifeMs,
+                    fadeMs: Number.isFinite(e.fadeMs) ? e.fadeMs : fadeMs,
+                    fill: e.fill
+                });
+                results.push(id);
+            }
+            return results;
+        }
+
         renderErase = ({ x, y, radius } = {}) => {
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
             const removed = [];
@@ -1118,6 +1325,46 @@
                         }
                         break;
                     }
+                    case "ellipse": {
+                        const cx = shape.cx;
+                        const cy = shape.cy;
+                        const rx = shape.rx;
+                        const ry = shape.ry;
+
+                        switch (shape.subType) {
+                            case "fill": {
+                                const vx = (x - cx) / rx;
+                                const vy = (y - cy) / ry;
+                                if ((vx * vx + vy * vy) <= 1) {
+                                    if (shape.uuid) removed.push(shape.uuid);
+                                    this.#shapeBuffer.splice(i, 1);
+                                } else {
+                                    const distToBoundary = Math.abs(Math.sqrt(vx * vx + vy * vy) - 1) * Math.max(rx, ry);
+                                    if (distToBoundary <= radius) {
+                                        if (shape.uuid) removed.push(shape.uuid);
+                                        this.#shapeBuffer.splice(i, 1);
+                                    }
+                                }
+                                break;
+                            }
+                            case "stroke": {
+                                const vx = (x - cx) / rx;
+                                const vy = (y - cy) / ry;
+                                const norm = Math.sqrt(vx * vx + vy * vy);
+                                const distToBoundary = Math.abs(norm - 1) * Math.max(rx, ry);
+                                if (distToBoundary <= radius) {
+                                    if (shape.uuid) removed.push(shape.uuid);
+                                    this.#shapeBuffer.splice(i, 1);
+                                }
+                                break;
+                            }
+                            default: {
+                                console.warn("Unknown drawboard shape subtype:", shape.subType);
+                                break;
+                            }
+                        }
+                        break;
+                    }
                     default: {
                         console.warn("Unknown drawboard shape type:", shape.type);
                         break;
@@ -1134,11 +1381,11 @@
             return removedUUIDs;
         }
 
-        eraseLine = ({ uuid } = {}) => {
+        eraseShape = ({ uuid } = {}) => {
             if (uuid == null) return [];
             const u = Number(uuid) >>> 0;
 
-            const removed = this.#removeLinesByUUIDs([u]);
+            const removed = this.#removeShapesByUUIDs([u]);
             if (removed && removed.length) {
                 this.#pushOp({ op: 1, uuids: removed.map(n => Number(n) >>> 0) });
             } else {
@@ -1147,10 +1394,10 @@
             return removed;
         }
 
-        eraseLines = (uuids = []) => {
+        eraseShapes = (uuids = []) => {
             if (!Array.isArray(uuids) || !uuids.length) return [];
             const clean = Array.from(new Set(uuids.map(n => Number(n) >>> 0)));
-            const removed = this.#removeLinesByUUIDs(clean);
+            const removed = this.#removeShapesByUUIDs(clean);
             if (removed && removed.length) {
                 this.#pushOp({ op: 1, uuids: removed.map(n => Number(n) >>> 0) });
             } else {
@@ -1160,7 +1407,7 @@
         }
 
         eraseAll = () => {
-            const ownerId = (MPP.client.user?.id ?? MPP.client.getOwnParticipant?.()?.id ?? null);
+            const ownerId = MPP?.client?.participantId || null;
             const ownerStr = ownerId !== null ? String(ownerId) : null;
             if (ownerStr !== null) {
                 this.#removeLinesByOwner(ownerStr);
@@ -1202,7 +1449,7 @@
                                 const u = this.#readUint32(bytes, state);
                                 uuids.push(u >>> 0);
                             }
-                            this.#removeLinesByUUIDs(uuids);
+                            this.#removeShapesByUUIDs(uuids);
                             break;
                         }
                         case 2: {
@@ -1338,6 +1585,67 @@
                                 transparency,
                                 lifeMs: lifeMs,
                                 fadeMs: fadeMs,
+                                uuid: uuid >>> 0,
+                                owner: senderId
+                            });
+                            break;
+                        }
+                        case 6: {
+                            const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
+                            const lineWidth = this.#readULEB128(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const cxu = this.#readUint16(bytes, state);
+                            const cyu = this.#readUint16(bytes, state);
+                            const rxu = this.#readUint16(bytes, state);
+                            const ryu = this.#readUint16(bytes, state);
+                            const uuid = this.#readUint32(bytes, state);
+
+                            const cx = Math.clamp(0, cxu / 65535, 1);
+                            const cy = Math.clamp(0, cyu / 65535, 1);
+                            const rx = Math.clamp(0, rxu / 65535, 1);
+                            const ry = Math.clamp(0, ryu / 65535, 1);
+
+                            this.renderEllipse({
+                                cx, cy,
+                                rx, ry,
+                                color,
+                                transparency,
+                                lineWidth,
+                                lifeMs: lifeMs,
+                                fadeMs: fadeMs,
+                                subType: "stroke",
+                                uuid: uuid >>> 0,
+                                owner: senderId
+                            });
+                            break;
+                        }
+                        case 7: {
+                            const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const cxu = this.#readUint16(bytes, state);
+                            const cyu = this.#readUint16(bytes, state);
+                            const rxu = this.#readUint16(bytes, state);
+                            const ryu = this.#readUint16(bytes, state);
+                            const uuid = this.#readUint32(bytes, state);
+
+                            const cx = Math.clamp(0, cxu / 65535, 1);
+                            const cy = Math.clamp(0, cyu / 65535, 1);
+                            const rx = Math.clamp(0, rxu / 65535, 1);
+                            const ry = Math.clamp(0, ryu / 65535, 1);
+
+                            this.renderEllipse({
+                                cx, cy,
+                                rx, ry,
+                                color,
+                                transparency,
+                                lineWidth: 1,
+                                lifeMs: lifeMs,
+                                fadeMs: fadeMs,
+                                subType: "fill",
                                 uuid: uuid >>> 0,
                                 owner: senderId
                             });
