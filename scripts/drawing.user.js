@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.0.6
+// @version      2.1.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -46,24 +46,24 @@
     - <uint8 op>
     1. Tells clients to clear this user's
     lines
- 
+
     ### OP 1: Clear lines
     - <uint8 op> <uleb128 length> <uint32 uuid>*
     1. Tells clients to clear lines with
     uuids provided
- 
+
     ### OP 2: Quick line
-    - <uint8 op> <uint24 color> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
     1. Tells clients to draw a line from
     (x1, y1) to (x2, y2) with options and
     provides a line uuid
- 
+
     ### OP 3: Start chain
-    - <uint8 op> <uint24 color> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
     1. Tells clients to set a point at
     (x, y) to start a chain of lines with
     options
- 
+
     ### OP 4: Continue chain
     - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
     1. Tells clients to continue off of
@@ -72,8 +72,8 @@
     should after be set to (x1, y1) so that
     the next continue will use that as the
     start points, etc.)
- 
- 
+
+    strings are prefixed with <uleb128 length>
     * Denotes multiple allowed
 */
 
@@ -141,6 +141,7 @@
         #lastPosition;
         #position;
         #color = "#000000";
+        #transparency = 1;
         #lineWidth = 3;
         #eraseFactor = 8;
         #lineLifeMs = 5000;
@@ -197,6 +198,9 @@
         get color() {
             return this.#color;
         }
+        get transparency() {
+            return this.#transparency;
+        }
         get lineWidth() {
             return this.#lineWidth;
         }
@@ -221,6 +225,9 @@
         }
         set color(color) {
             this.#color = color;
+        }
+        set transparency(transparency) {
+            this.#transparency = Math.max(0, Math.min(1, transparency));
         }
         set lineWidth(lineWidth) {
             this.#lineWidth = lineWidth;
@@ -290,6 +297,7 @@
                         x2: end.x,
                         y2: end.y,
                         color: this.#color,
+                        transparency: this.#transparency,
                         lineWidth: this.#lineWidth,
                         lineLifeMs: this.#lineLifeMs,
                         lineFadeMs: this.#lineFadeMs
@@ -474,10 +482,11 @@
             return bytes;
         }
 
-        #buildQuickLinePacket = (colorHex, lineWidth, lineLifeMs, lineFadeMs, x1, y1, x2, y2, uuid) => {
+        #buildQuickLinePacket = (color, transparency, lineWidth, lineLifeMs, lineFadeMs, x1, y1, x2, y2, uuid) => {
             const bytes = [];
             this.#writeUint8(bytes, 2);
-            this.#writeColor(bytes, colorHex);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
@@ -489,10 +498,11 @@
             return bytes;
         }
 
-        #buildStartChainPacket = (colorHex, lineWidth, lineLifeMs, lineFadeMs, x, y) => {
+        #buildStartChainPacket = (color, transparency, lineWidth, lineLifeMs, lineFadeMs, x, y) => {
             const bytes = [];
             this.#writeUint8(bytes, 3);
-            this.#writeColor(bytes, colorHex);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
@@ -575,12 +585,31 @@
                         break;
                     }
                     case 2: {
-                        builtOps.push(this.#buildQuickLinePacket(item.color, item.lineWidth, item.lineLifeMs, item.lineFadeMs, item.x1u, item.y1u, item.x2u, item.y2u, item.uuid >>> 0));
+                        builtOps.push(this.#buildQuickLinePacket(
+                            item.color,
+                            item.transparency,
+                            item.lineWidth,
+                            item.lineLifeMs,
+                            item.lineFadeMs,
+                            item.x1u,
+                            item.y1u,
+                            item.x2u,
+                            item.y2u,
+                            item.uuid >>> 0
+                        ));
                         i++;
                         break;
                     }
                     case 3: {
-                        builtOps.push(this.#buildStartChainPacket(item.color, item.lineWidth, item.lineLifeMs, item.lineFadeMs, item.xu, item.yu));
+                        builtOps.push(this.#buildStartChainPacket(
+                            item.color,
+                            (typeof item.transparency === "number") ? item.transparency : this.#transparency,
+                            item.lineWidth,
+                            item.lineLifeMs,
+                            item.lineFadeMs,
+                            item.xu,
+                            item.yu
+                        ));
                         i++;
                         break;
                     }
@@ -661,7 +690,7 @@
                     alpha = Math.clamp(0, 1 - (fadeAge / lineFadeMs), 1);
                 }
 
-                this.#ctx.globalAlpha = alpha;
+                this.#ctx.globalAlpha = alpha * line.transparency; // line transparency effect
                 this.#ctx.globalCompositeOperation = "source-over";
                 this.#ctx.strokeStyle = line.color;
                 this.#ctx.lineWidth = line.lineWidth;
@@ -676,18 +705,20 @@
             requestAnimationFrame(this.#draw);
         }
 
-        setLineSettings({ color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) {
+        setLineSettings({ color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) {
             this.#color = color ?? this.#color;
+            this.#transparency = transparency ?? this.#transparency;
             this.#lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
             this.#lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
             this.#lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
         }
 
-        renderLine({ x1, y1, x2, y2, color, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null } = {}) {
+        renderLine({ x1, y1, x2, y2, color, transparency, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null } = {}) {
             this.#lineBuffer.push({
                 x1, y1,
                 x2, y2,
                 color,
+                transparency: Math.clamp(0, transparency, 1),
                 lineWidth,
                 lineLifeMs,
                 lineFadeMs,
@@ -699,8 +730,9 @@
             return uuid >>> 0;
         }
 
-        drawLine = ({ x1, y1, x2, y2, color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null, chain = true } = {}) => {
+        drawLine = ({ x1, y1, x2, y2, color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null, chain = true } = {}) => {
             color = color ?? this.#color;
+            transparency = transparency ?? this.#transparency;
             lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
             lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
             lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
@@ -718,6 +750,7 @@
                 x2: nx2,
                 y2: ny2,
                 color: color,
+                transparency: transparency,
                 lineWidth: lineWidth,
                 lineLifeMs: lineLifeMs,
                 lineFadeMs: lineFadeMs,
@@ -735,6 +768,7 @@
                     this.#pushOp({
                         op: 3,
                         color: color,
+                        transparency: transparency,
                         lineWidth: lineWidth,
                         lineLifeMs: lineLifeMs,
                         lineFadeMs: lineFadeMs,
@@ -756,6 +790,7 @@
                 this.#pushOp({
                     op: 2,
                     color: color,
+                    transparency: transparency,
                     lineWidth: lineWidth,
                     lineLifeMs: lineLifeMs,
                     lineFadeMs: lineFadeMs,
@@ -770,7 +805,7 @@
             return uuid >>> 0;
         }
 
-        drawLines = (segments = [], { color = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
+        drawLines = (segments = [], { color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
             if (!Array.isArray(segments) || !segments.length) return [];
 
             const segs = segments.map(s => ({
@@ -779,9 +814,10 @@
                 x2: Math.clamp(0, Number(s.x2) || 0, 1),
                 y2: Math.clamp(0, Number(s.y2) || 0, 1),
                 color: s.color ?? color,
+                transparency: s.transparency ?? transparency,
                 lineWidth: Number.isFinite(s.lineWidth) ? s.lineWidth : lineWidth,
                 lineLifeMs: Number.isFinite(s.lineLifeMs) ? s.lineLifeMs : lineLifeMs,
-                lineFadeMs: Number.isFinite(s.lineFadeMs) ? s.lineFadeMs : lineFadeMs
+                lineFadeMs: Number.isFinite(s.lineFadeMs) ? s.lineFadeMs : lineFadeMs,
             }));
 
             const eps = 1e-6;
@@ -801,6 +837,7 @@
                 this.#pushOp({
                     op: 3,
                     color: first.color ?? this.#color,
+                    transparency: first.transparency ?? this.#transparency,
                     lineWidth: first.lineWidth ?? this.#lineWidth,
                     lineLifeMs: first.lineLifeMs ?? this.#lineLifeMs,
                     lineFadeMs: first.lineFadeMs ?? this.#lineFadeMs,
@@ -821,6 +858,7 @@
                         x2: s.x2,
                         y2: s.y2,
                         color: s.color ?? this.#color,
+                        transparency: s.transparency ?? this.#transparency,
                         lineWidth: s.lineWidth ?? this.#lineWidth,
                         lineLifeMs: s.lineLifeMs ?? this.#lineLifeMs,
                         lineFadeMs: s.lineFadeMs ?? this.#lineFadeMs,
@@ -851,6 +889,7 @@
                     x2: s.x2,
                     y2: s.y2,
                     color: s.color ?? color,
+                    transparency: s.transparency ?? transparency,
                     lineWidth: s.lineWidth ?? lineWidth,
                     lineLifeMs: s.lineLifeMs ?? lineLifeMs,
                     lineFadeMs: s.lineFadeMs ?? lineFadeMs,
@@ -955,6 +994,7 @@
                         }
                         case 2: {
                             const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
                             const lineWidth = this.#readULEB128(bytes, state);
                             const lineLifeMs = this.#readULEB128(bytes, state);
                             const lineFadeMs = this.#readULEB128(bytes, state);
@@ -972,6 +1012,7 @@
                             this.renderLine({
                                 x1, y1, x2, y2,
                                 color,
+                                transparency,
                                 lineWidth,
                                 lineLifeMs: lineLifeMs,
                                 lineFadeMs: lineFadeMs,
@@ -982,6 +1023,7 @@
                         }
                         case 3: {
                             const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
                             const lineWidth = this.#readULEB128(bytes, state);
                             const lineLifeMs = this.#readULEB128(bytes, state);
                             const lineFadeMs = this.#readULEB128(bytes, state);
@@ -991,6 +1033,7 @@
                                 x: xu >>> 0,
                                 y: yu >>> 0,
                                 color,
+                                transparency,
                                 lineWidth,
                                 lineLifeMs: lineLifeMs,
                                 lineFadeMs: lineFadeMs
@@ -1021,6 +1064,7 @@
                                             x,
                                             y,
                                             color: "#000000",
+                                            transparency: 1,
                                             lineWidth: 3,
                                             lineLifeMs: 5000,
                                             lineFadeMs: 3000
@@ -1040,6 +1084,7 @@
                                         x2: x2n,
                                         y2: y2n,
                                         color: chain.color,
+                                        transparency: chain.transparency,
                                         lineWidth: chain.lineWidth,
                                         lineLifeMs: chain.lineLifeMs,
                                         lineFadeMs: chain.lineFadeMs,
