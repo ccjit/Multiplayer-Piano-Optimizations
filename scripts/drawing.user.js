@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.1.0
+// @version      2.1.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -667,22 +667,32 @@
         }
 
         #draw = () => {
-            if (!this.enabled || !Drawboard.connected) return;
+            if (!this.enabled || !Drawboard.connected) {
+                requestAnimationFrame(this.#draw);
+                return;
+            }
 
             this.#clear();
             const now = Date.now();
-            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
-                const line = this.#lineBuffer[i];
 
+            const kept = [];
+            for (let i = 0; i < this.#lineBuffer.length; i++) {
+                const line = this.#lineBuffer[i];
                 const timestamp = line.timestamp || 0;
+                const age = now - timestamp;
+                if (age < (line.lineLifeMs + line.lineFadeMs)) {
+                    kept.push(line);
+                }
+            }
+            this.#lineBuffer = kept;
+            this.#lineBuffer.sort((a, b) => a.timestamp - b.timestamp);
+
+            for (let i = 0; i < this.#lineBuffer.length; i++) {
+                const line = this.#lineBuffer[i];
+                const timestamp = line.timestamp;
                 const lineLifeMs = line.lineLifeMs;
                 const lineFadeMs = line.lineFadeMs;
                 const age = now - timestamp;
-
-                if (age >= lineLifeMs + lineFadeMs) {
-                    this.#lineBuffer.splice(i, 1);
-                    continue;
-                }
 
                 let alpha = 1;
                 if (age > lineLifeMs) {
@@ -690,18 +700,17 @@
                     alpha = Math.clamp(0, 1 - (fadeAge / lineFadeMs), 1);
                 }
 
-                this.#ctx.globalAlpha = alpha * line.transparency; // line transparency effect
+                this.#ctx.globalAlpha = alpha * line.transparency;
                 this.#ctx.globalCompositeOperation = "source-over";
                 this.#ctx.strokeStyle = line.color;
                 this.#ctx.lineWidth = line.lineWidth;
-                // this.#ctx.lineCap = "round";
                 this.#ctx.beginPath();
                 this.#ctx.moveTo(line.x1 * this.#canvas.width, line.y1 * this.#canvas.height);
                 this.#ctx.lineTo(line.x2 * this.#canvas.width, line.y2 * this.#canvas.height);
                 this.#ctx.stroke();
             }
-            this.#ctx.globalAlpha = 1;
 
+            this.#ctx.globalAlpha = 1;
             requestAnimationFrame(this.#draw);
         }
 
