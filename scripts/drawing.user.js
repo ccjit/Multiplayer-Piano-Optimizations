@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.1.1
+// @version      2.2.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -45,18 +45,18 @@
     ### OP 0: Clear user
     - <uint8 op>
     1. Tells clients to clear this user's
-    lines
+    shapes
 
-    ### OP 1: Clear lines
+    ### OP 1: Clear shapes
     - <uint8 op> <uleb128 length> <uint32 uuid>*
-    1. Tells clients to clear lines with
+    1. Tells clients to clear shapes with
     uuids provided
 
     ### OP 2: Quick line
     - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
     1. Tells clients to draw a line from
     (x1, y1) to (x2, y2) with options and
-    provides a line uuid
+    provides a shape uuid
 
     ### OP 3: Start chain
     - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
@@ -68,10 +68,13 @@
     - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
     1. Tells clients to continue off of
     the user's chain to point (x, y) and
-    provides a line uuid (the (x, y) here
-    should after be set to (x1, y1) so that
-    the next continue will use that as the
-    start points, etc.)
+    provides a shape uuid
+
+    ### OP 5: Filled triangle
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint16 x3> <uint16 y3> <uint32 uuid>
+    1. Tells clients to draw a filled triangle
+    with the provided vertices and options,
+    and provides a shape uuid.
 
     strings are prefixed with <uleb128 length>
     * Denotes multiple allowed
@@ -144,9 +147,9 @@
         #transparency = 1;
         #lineWidth = 3;
         #eraseFactor = 8;
-        #lineLifeMs = 5000;
-        #lineFadeMs = 3000;
-        #lineBuffer = [];
+        #lifeMs = 5000;
+        #fadeMs = 3000;
+        #shapeBuffer = [];
         #opBuffer = [];
         #payloadFlushMs = 200;
         #flushInterval;
@@ -207,11 +210,11 @@
         get eraseFactor() {
             return this.#eraseFactor;
         }
-        get lineLifeMs() {
-            return this.#lineLifeMs;
+        get lifeMs() {
+            return this.#lifeMs;
         }
-        get lineFadeMs() {
-            return this.#lineFadeMs;
+        get fadeMs() {
+            return this.#fadeMs;
         }
         get mouseMoveThrottleMs() {
             return this.#mouseMoveThrottleMs;
@@ -235,11 +238,11 @@
         set eraseFactor(eraseFactor) {
             this.#eraseFactor = eraseFactor;
         }
-        set lineLifeMs(lineLifeMs) {
-            this.#lineLifeMs = lineLifeMs;
+        set lifeMs(lifeMs) {
+            this.#lifeMs = lifeMs;
         }
-        set lineFadeMs(lineFadeMs) {
-            this.#lineFadeMs = lineFadeMs;
+        set fadeMs(fadeMs) {
+            this.#fadeMs = fadeMs;
         }
         set mouseMoveThrottleMs(mouseMoveThrottleMs) {
             this.#mouseMoveThrottleMs = mouseMoveThrottleMs;
@@ -299,8 +302,8 @@
                         color: this.#color,
                         transparency: this.#transparency,
                         lineWidth: this.#lineWidth,
-                        lineLifeMs: this.#lineLifeMs,
-                        lineFadeMs: this.#lineFadeMs
+                        lifeMs: this.#lifeMs,
+                        fadeMs: this.#fadeMs
                     });
 
                     this.#lastPosition = this.#position;
@@ -441,11 +444,11 @@
         #removeLinesByUUIDs = (uuids) => {
             const removed = [];
             const set = new Set(uuids.map(n => Number(n)));
-            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
-                const line = this.#lineBuffer[i];
-                if (set.has(Number(line.uuid))) {
-                    removed.push(line.uuid);
-                    this.#lineBuffer.splice(i, 1);
+            for (let i = this.#shapeBuffer.length - 1; i >= 0; i--) {
+                const shape = this.#shapeBuffer[i];
+                if (set.has(Number(shape.uuid))) {
+                    removed.push(shape.uuid);
+                    this.#shapeBuffer.splice(i, 1);
                 }
             }
             return Array.from(new Set(removed));
@@ -453,11 +456,11 @@
 
         #removeLinesByOwner = (ownerId) => {
             const removed = [];
-            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
-                const line = this.#lineBuffer[i];
-                if (line.owner === ownerId) {
-                    if (line.uuid) removed.push(line.uuid);
-                    this.#lineBuffer.splice(i, 1);
+            for (let i = this.#shapeBuffer.length - 1; i >= 0; i--) {
+                const shape = this.#shapeBuffer[i];
+                if (shape.owner === ownerId) {
+                    if (shape.uuid) removed.push(shape.uuid);
+                    this.#shapeBuffer.splice(i, 1);
                 }
             }
             this.#chains.delete(ownerId);
@@ -482,14 +485,14 @@
             return bytes;
         }
 
-        #buildQuickLinePacket = (color, transparency, lineWidth, lineLifeMs, lineFadeMs, x1, y1, x2, y2, uuid) => {
+        #buildQuickLinePacket = (color, transparency, lineWidth, lifeMs, fadeMs, x1, y1, x2, y2, uuid) => {
             const bytes = [];
             this.#writeUint8(bytes, 2);
             this.#writeColor(bytes, color);
             this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
             this.#writeUint16(bytes, x1 & 0xFFFF);
             this.#writeUint16(bytes, y1 & 0xFFFF);
             this.#writeUint16(bytes, x2 & 0xFFFF);
@@ -498,14 +501,14 @@
             return bytes;
         }
 
-        #buildStartChainPacket = (color, transparency, lineWidth, lineLifeMs, lineFadeMs, x, y) => {
+        #buildStartChainPacket = (color, transparency, lineWidth, lifeMs, fadeMs, x, y) => {
             const bytes = [];
             this.#writeUint8(bytes, 3);
             this.#writeColor(bytes, color);
             this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
-            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
             this.#writeUint16(bytes, x & 0xFFFF);
             this.#writeUint16(bytes, y & 0xFFFF);
             return bytes;
@@ -520,6 +523,23 @@
                 this.#writeUint16(bytes, e.y & 0xFFFF);
                 this.#writeUint32(bytes, e.uuid >>> 0);
             }
+            return bytes;
+        }
+
+        #buildTrianglePacket = (color, transparency, lifeMs, fadeMs, x1, y1, x2, y2, x3, y3, uuid) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 5);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, x1 & 0xFFFF);
+            this.#writeUint16(bytes, y1 & 0xFFFF);
+            this.#writeUint16(bytes, x2 & 0xFFFF);
+            this.#writeUint16(bytes, y2 & 0xFFFF);
+            this.#writeUint16(bytes, x3 & 0xFFFF);
+            this.#writeUint16(bytes, y3 & 0xFFFF);
+            this.#writeUint32(bytes, uuid >>> 0);
             return bytes;
         }
 
@@ -589,8 +609,8 @@
                             item.color,
                             item.transparency,
                             item.lineWidth,
-                            item.lineLifeMs,
-                            item.lineFadeMs,
+                            item.lifeMs,
+                            item.fadeMs,
                             item.x1u,
                             item.y1u,
                             item.x2u,
@@ -603,10 +623,10 @@
                     case 3: {
                         builtOps.push(this.#buildStartChainPacket(
                             item.color,
-                            (typeof item.transparency === "number") ? item.transparency : this.#transparency,
+                            item.transparency,
                             item.lineWidth,
-                            item.lineLifeMs,
-                            item.lineFadeMs,
+                            item.lifeMs,
+                            item.fadeMs,
                             item.xu,
                             item.yu
                         ));
@@ -626,6 +646,23 @@
                         }
                         builtOps.push(this.#buildContinueChainPacket(allEntries));
                         i = j;
+                        break;
+                    }
+                    case 5: {
+                        builtOps.push(this.#buildTrianglePacket(
+                            item.color,
+                            item.transparency,
+                            item.lifeMs,
+                            item.fadeMs,
+                            item.x1u,
+                            item.y1u,
+                            item.x2u,
+                            item.y2u,
+                            item.x3u,
+                            item.y3u,
+                            item.uuid >>> 0
+                        ));
+                        i++;
                         break;
                     }
                     default: {
@@ -662,6 +699,29 @@
             return Math.sqrt(dx * dx + dy * dy);
         }
 
+        // https://www.geeksforgeeks.org/dsa/check-whether-a-given-point-lies-inside-a-triangle-or-not/
+        #pointInTriangle = (px, py, ax, ay, bx, by, cx, cy) => {
+            const v0x = cx - ax;
+            const v0y = cy - ay;
+            const v1x = bx - ax;
+            const v1y = by - ay;
+            const v2x = px - ax;
+            const v2y = py - ay;
+
+            const dot00 = v0x * v0x + v0y * v0y;
+            const dot01 = v0x * v1x + v0y * v1y;
+            const dot02 = v0x * v2x + v0y * v2y;
+            const dot11 = v1x * v1x + v1y * v1y;
+            const dot12 = v1x * v2x + v1y * v2y;
+
+            const denom = dot00 * dot11 - dot01 * dot01;
+            if (denom === 0) return false;
+            const invDenom = 1 / denom;
+            const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+            const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+            return (u >= 0) && (v >= 0) && (u + v < 1);
+        }
+
         #clear = () => {
             this.#ctx.clearRect(0, 0, this.#canvas.width, this.#canvas.height);
         }
@@ -676,75 +736,97 @@
             const now = Date.now();
 
             const kept = [];
-            for (let i = 0; i < this.#lineBuffer.length; i++) {
-                const line = this.#lineBuffer[i];
-                const timestamp = line.timestamp || 0;
+            for (let i = 0; i < this.#shapeBuffer.length; i++) {
+                const shape = this.#shapeBuffer[i];
+                const timestamp = shape.timestamp || 0;
                 const age = now - timestamp;
-                if (age < (line.lineLifeMs + line.lineFadeMs)) {
-                    kept.push(line);
+                if (age < (shape.lifeMs + shape.fadeMs)) {
+                    kept.push(shape);
                 }
             }
-            this.#lineBuffer = kept;
-            this.#lineBuffer.sort((a, b) => a.timestamp - b.timestamp);
+            this.#shapeBuffer = kept;
+            this.#shapeBuffer.sort((a, b) => a.timestamp - b.timestamp);
 
-            for (let i = 0; i < this.#lineBuffer.length; i++) {
-                const line = this.#lineBuffer[i];
-                const timestamp = line.timestamp;
-                const lineLifeMs = line.lineLifeMs;
-                const lineFadeMs = line.lineFadeMs;
+            for (let i = 0; i < this.#shapeBuffer.length; i++) {
+                const shape = this.#shapeBuffer[i];
+                const timestamp = shape.timestamp;
+                const lifeMs = shape.lifeMs;
+                const fadeMs = shape.fadeMs;
                 const age = now - timestamp;
 
                 let alpha = 1;
-                if (age > lineLifeMs) {
-                    const fadeAge = age - lineLifeMs;
-                    alpha = Math.clamp(0, 1 - (fadeAge / lineFadeMs), 1);
+                if (age > lifeMs) {
+                    const fadeAge = age - lifeMs;
+                    alpha = Math.clamp(0, 1 - (fadeAge / fadeMs), 1);
                 }
 
-                this.#ctx.globalAlpha = alpha * line.transparency;
-                this.#ctx.globalCompositeOperation = "source-over";
-                this.#ctx.strokeStyle = line.color;
-                this.#ctx.lineWidth = line.lineWidth;
-                this.#ctx.beginPath();
-                this.#ctx.moveTo(line.x1 * this.#canvas.width, line.y1 * this.#canvas.height);
-                this.#ctx.lineTo(line.x2 * this.#canvas.width, line.y2 * this.#canvas.height);
-                this.#ctx.stroke();
+                this.#ctx.globalAlpha = alpha * shape.transparency;
+                switch (shape.type) {
+                    case "line": {
+                        this.#ctx.globalCompositeOperation = "source-over";
+                        this.#ctx.strokeStyle = shape.color;
+                        this.#ctx.lineWidth = shape.lineWidth;
+                        this.#ctx.beginPath();
+                        this.#ctx.moveTo(shape.x1 * this.#canvas.width, shape.y1 * this.#canvas.height);
+                        this.#ctx.lineTo(shape.x2 * this.#canvas.width, shape.y2 * this.#canvas.height);
+                        this.#ctx.stroke();
+                        break;
+                    }
+                    case "triangle": {
+                        this.#ctx.globalCompositeOperation = "source-over";
+                        this.#ctx.fillStyle = shape.color;
+                        this.#ctx.beginPath();
+                        this.#ctx.moveTo(shape.x1 * this.#canvas.width, shape.y1 * this.#canvas.height);
+                        this.#ctx.lineTo(shape.x2 * this.#canvas.width, shape.y2 * this.#canvas.height);
+                        this.#ctx.lineTo(shape.x3 * this.#canvas.width, shape.y3 * this.#canvas.height);
+                        this.#ctx.closePath();
+                        this.#ctx.fill();
+                        break;
+                    }
+                    default: {
+                        console.warn("Unknown drawboard shape type:", shape.type);
+                        break;
+                    }
+                }
             }
 
             this.#ctx.globalAlpha = 1;
             requestAnimationFrame(this.#draw);
         }
 
-        setLineSettings({ color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) {
+        setLineSettings = ({ color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null } = {}) => {
             this.#color = color ?? this.#color;
             this.#transparency = transparency ?? this.#transparency;
             this.#lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
-            this.#lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
-            this.#lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
+            this.#lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
+            this.#fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
         }
 
-        renderLine({ x1, y1, x2, y2, color, transparency, lineWidth, lineLifeMs, lineFadeMs, uuid = this.generateUUID(), owner = null } = {}) {
-            this.#lineBuffer.push({
+        renderLine = ({ x1, y1, x2, y2, color, transparency, lineWidth, lifeMs, fadeMs, uuid = this.generateUUID(), owner = null } = {}) => {
+            const shape = {
+                type: "line",
                 x1, y1,
                 x2, y2,
                 color,
                 transparency: Math.clamp(0, transparency, 1),
                 lineWidth,
-                lineLifeMs,
-                lineFadeMs,
+                lifeMs,
+                fadeMs,
                 timestamp: Date.now(),
                 uuid: uuid >>> 0,
                 owner: owner || null
-            });
-
+            };
+            this.#shapeBuffer.push(shape);
             return uuid >>> 0;
         }
 
-        drawLine = ({ x1, y1, x2, y2, color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null, chain = true } = {}) => {
+
+        drawLine = ({ x1, y1, x2, y2, color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null, chain = true } = {}) => {
             color = color ?? this.#color;
             transparency = transparency ?? this.#transparency;
             lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
-            lineLifeMs = (Number.isFinite(lineLifeMs) ? lineLifeMs : this.#lineLifeMs) >>> 0;
-            lineFadeMs = (Number.isFinite(lineFadeMs) ? lineFadeMs : this.#lineFadeMs) >>> 0;
+            lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
+            fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
 
             const nx1 = Math.clamp(0, Number(x1) || 0, 1);
             const ny1 = Math.clamp(0, Number(y1) || 0, 1);
@@ -761,8 +843,8 @@
                 color: color,
                 transparency: transparency,
                 lineWidth: lineWidth,
-                lineLifeMs: lineLifeMs,
-                lineFadeMs: lineFadeMs,
+                lifeMs: lifeMs,
+                fadeMs: fadeMs,
                 uuid: uuid,
                 owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
             });
@@ -779,8 +861,8 @@
                         color: color,
                         transparency: transparency,
                         lineWidth: lineWidth,
-                        lineLifeMs: lineLifeMs,
-                        lineFadeMs: lineFadeMs,
+                        lifeMs: lifeMs,
+                        fadeMs: fadeMs,
                         xu: x1u,
                         yu: y1u
                     });
@@ -801,8 +883,8 @@
                     color: color,
                     transparency: transparency,
                     lineWidth: lineWidth,
-                    lineLifeMs: lineLifeMs,
-                    lineFadeMs: lineFadeMs,
+                    lifeMs: lifeMs,
+                    fadeMs: fadeMs,
                     x1u: x1u & 0xFFFF,
                     y1u: y1u & 0xFFFF,
                     x2u: x2u & 0xFFFF,
@@ -814,7 +896,7 @@
             return uuid >>> 0;
         }
 
-        drawLines = (segments = [], { color = null, transparency = null, lineWidth = null, lineLifeMs = null, lineFadeMs = null } = {}) => {
+        drawLines = (segments = [], { color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null } = {}) => {
             if (!Array.isArray(segments) || !segments.length) return [];
 
             const segs = segments.map(s => ({
@@ -825,8 +907,8 @@
                 color: s.color ?? color,
                 transparency: s.transparency ?? transparency,
                 lineWidth: Number.isFinite(s.lineWidth) ? s.lineWidth : lineWidth,
-                lineLifeMs: Number.isFinite(s.lineLifeMs) ? s.lineLifeMs : lineLifeMs,
-                lineFadeMs: Number.isFinite(s.lineFadeMs) ? s.lineFadeMs : lineFadeMs,
+                lifeMs: Number.isFinite(s.lifeMs) ? s.lifeMs : lifeMs,
+                fadeMs: Number.isFinite(s.fadeMs) ? s.fadeMs : fadeMs,
             }));
 
             const eps = 1e-6;
@@ -848,8 +930,8 @@
                     color: first.color ?? this.#color,
                     transparency: first.transparency ?? this.#transparency,
                     lineWidth: first.lineWidth ?? this.#lineWidth,
-                    lineLifeMs: first.lineLifeMs ?? this.#lineLifeMs,
-                    lineFadeMs: first.lineFadeMs ?? this.#lineFadeMs,
+                    lifeMs: first.lifeMs ?? this.#lifeMs,
+                    fadeMs: first.fadeMs ?? this.#fadeMs,
                     xu: xu,
                     yu: yu
                 });
@@ -869,8 +951,8 @@
                         color: s.color ?? this.#color,
                         transparency: s.transparency ?? this.#transparency,
                         lineWidth: s.lineWidth ?? this.#lineWidth,
-                        lineLifeMs: s.lineLifeMs ?? this.#lineLifeMs,
-                        lineFadeMs: s.lineFadeMs ?? this.#lineFadeMs,
+                        lifeMs: s.lifeMs ?? this.#lifeMs,
+                        fadeMs: s.fadeMs ?? this.#fadeMs,
                         uuid: uuid,
                         owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
                     });
@@ -900,8 +982,8 @@
                     color: s.color ?? color,
                     transparency: s.transparency ?? transparency,
                     lineWidth: s.lineWidth ?? lineWidth,
-                    lineLifeMs: s.lineLifeMs ?? lineLifeMs,
-                    lineFadeMs: s.lineFadeMs ?? lineFadeMs,
+                    lifeMs: s.lifeMs ?? lifeMs,
+                    fadeMs: s.fadeMs ?? fadeMs,
                     chain: false
                 });
                 results.push(id);
@@ -909,15 +991,137 @@
             return results;
         }
 
-        renderErase({ x, y, radius } = {}) {
+        renderTriangle = ({ x1, y1, x2, y2, x3, y3, color, transparency, lifeMs, fadeMs, uuid = this.generateUUID(), owner = null } = {}) => {
+            const shape = {
+                type: "triangle",
+                x1, y1,
+                x2, y2,
+                x3, y3,
+                color,
+                transparency: Math.clamp(0, transparency, 1),
+                lifeMs,
+                fadeMs,
+                timestamp: Date.now(),
+                uuid: uuid >>> 0,
+                owner: owner || null
+            };
+            this.#shapeBuffer.push(shape);
+            return uuid >>> 0;
+        }
+
+        drawTriangle = ({ x1, y1, x2, y2, x3, y3, color = null, transparency = null, lifeMs = null, fadeMs = null } = {}) => {
+            color = color ?? this.#color;
+            transparency = transparency ?? this.#transparency;
+            lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
+            fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
+
+            const nx1 = Math.clamp(0, Number(x1) || 0, 1);
+            const ny1 = Math.clamp(0, Number(y1) || 0, 1);
+            const nx2 = Math.clamp(0, Number(x2) || 0, 1);
+            const ny2 = Math.clamp(0, Number(y2) || 0, 1);
+            const nx3 = Math.clamp(0, Number(x3) || 0, 1);
+            const ny3 = Math.clamp(0, Number(y3) || 0, 1);
+
+            const uuid = this.generateUUID();
+
+            this.renderTriangle({
+                x1: nx1,
+                y1: ny1,
+                x2: nx2,
+                y2: ny2,
+                x3: nx3,
+                y3: ny3,
+                color: color,
+                transparency: transparency,
+                lifeMs: lifeMs,
+                fadeMs: fadeMs,
+                uuid: uuid,
+                owner: (MPP.client.user?.id || MPP.client.getOwnParticipant?.()?.id || null)
+            });
+
+            const x1u = Math.round(nx1 * 65535) >>> 0;
+            const y1u = Math.round(ny1 * 65535) >>> 0;
+            const x2u = Math.round(nx2 * 65535) >>> 0;
+            const y2u = Math.round(ny2 * 65535) >>> 0;
+            const x3u = Math.round(nx3 * 65535) >>> 0;
+            const y3u = Math.round(ny3 * 65535) >>> 0;
+
+            this.#pushOp({
+                op: 5,
+                color: color,
+                transparency: transparency,
+                lifeMs: lifeMs,
+                fadeMs: fadeMs,
+                x1u: x1u & 0xFFFF,
+                y1u: y1u & 0xFFFF,
+                x2u: x2u & 0xFFFF,
+                y2u: y2u & 0xFFFF,
+                x3u: x3u & 0xFFFF,
+                y3u: y3u & 0xFFFF,
+                uuid: uuid >>> 0
+            });
+
+            return uuid >>> 0;
+        }
+
+        drawTriangles = (triangles = [], { color = null, transparency = null, lifeMs = null, fadeMs = null } = {}) => {
+            if (!Array.isArray(triangles) || !triangles.length) return [];
+
+            const results = [];
+            for (const t of triangles) {
+                const id = this.drawTriangle({
+                    x1: Math.clamp(0, Number(t.x1) || 0, 1),
+                    y1: Math.clamp(0, Number(t.y1) || 0, 1),
+                    x2: Math.clamp(0, Number(t.x2) || 0, 1),
+                    y2: Math.clamp(0, Number(t.y2) || 0, 1),
+                    x3: Math.clamp(0, Number(t.x3) || 0, 1),
+                    y3: Math.clamp(0, Number(t.y3) || 0, 1),
+                    color: t.color ?? color,
+                    transparency: t.transparency ?? transparency,
+                    lifeMs: Number.isFinite(t.lifeMs) ? t.lifeMs : lifeMs,
+                    fadeMs: Number.isFinite(t.fadeMs) ? t.fadeMs : fadeMs
+                });
+                results.push(id);
+            }
+            return results;
+        }
+
+        renderErase = ({ x, y, radius } = {}) => {
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
             const removed = [];
-            for (let i = this.#lineBuffer.length - 1; i >= 0; i--) {
-                const line = this.#lineBuffer[i];
-                const d = this.#pointToSegmentDistance(x, y, line.x1, line.y1, line.x2, line.y2);
-                if (d <= radius) {
-                    if (line.uuid) removed.push(line.uuid);
-                    this.#lineBuffer.splice(i, 1);
+            for (let i = this.#shapeBuffer.length - 1; i >= 0; i--) {
+                const shape = this.#shapeBuffer[i];
+
+                switch (shape.type) {
+                    case "line": {
+                        const d = this.#pointToSegmentDistance(x, y, shape.x1, shape.y1, shape.x2, shape.y2);
+                        if (d <= radius) {
+                            if (shape.uuid) removed.push(shape.uuid);
+                            this.#shapeBuffer.splice(i, 1);
+                        }
+                        break;
+                    }
+                    case "triangle": {
+                        const inside = this.#pointInTriangle(x, y, shape.x1, shape.y1, shape.x2, shape.y2, shape.x3, shape.y3);
+                        if (inside) {
+                            if (shape.uuid) removed.push(shape.uuid);
+                            this.#shapeBuffer.splice(i, 1);
+                        } else {
+                            const d1 = this.#pointToSegmentDistance(x, y, shape.x1, shape.y1, shape.x2, shape.y2);
+                            const d2 = this.#pointToSegmentDistance(x, y, shape.x2, shape.y2, shape.x3, shape.y3);
+                            const d3 = this.#pointToSegmentDistance(x, y, shape.x3, shape.y3, shape.x1, shape.y1);
+                            const d = Math.min(d1, d2, d3);
+                            if (d <= radius) {
+                                if (shape.uuid) removed.push(shape.uuid);
+                                this.#shapeBuffer.splice(i, 1);
+                            }
+                        }
+                        break;
+                    }
+                    default: {
+                        console.warn("Unknown drawboard shape type:", shape.type);
+                        break;
+                    }
                 }
             }
 
@@ -930,7 +1134,7 @@
             return removedUUIDs;
         }
 
-        eraseLine({ uuid } = {}) {
+        eraseLine = ({ uuid } = {}) => {
             if (uuid == null) return [];
             const u = Number(uuid) >>> 0;
 
@@ -943,7 +1147,7 @@
             return removed;
         }
 
-        eraseLines(uuids = []) {
+        eraseLines = (uuids = []) => {
             if (!Array.isArray(uuids) || !uuids.length) return [];
             const clean = Array.from(new Set(uuids.map(n => Number(n) >>> 0)));
             const removed = this.#removeLinesByUUIDs(clean);
@@ -955,13 +1159,13 @@
             return removed;
         }
 
-        eraseAll() {
+        eraseAll = () => {
             const ownerId = (MPP.client.user?.id ?? MPP.client.getOwnParticipant?.()?.id ?? null);
             const ownerStr = ownerId !== null ? String(ownerId) : null;
             if (ownerStr !== null) {
                 this.#removeLinesByOwner(ownerStr);
             } else {
-                this.#lineBuffer.length = 0;
+                this.#shapeBuffer.length = 0;
             }
             this.#pushOp({ op: 0 });
         }
@@ -1005,8 +1209,8 @@
                             const color = this.#readColor(bytes, state);
                             const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
                             const lineWidth = this.#readULEB128(bytes, state);
-                            const lineLifeMs = this.#readULEB128(bytes, state);
-                            const lineFadeMs = this.#readULEB128(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
                             const x1u = this.#readUint16(bytes, state);
                             const y1u = this.#readUint16(bytes, state);
                             const x2u = this.#readUint16(bytes, state);
@@ -1023,8 +1227,8 @@
                                 color,
                                 transparency,
                                 lineWidth,
-                                lineLifeMs: lineLifeMs,
-                                lineFadeMs: lineFadeMs,
+                                lifeMs: lifeMs,
+                                fadeMs: fadeMs,
                                 uuid: uuid >>> 0,
                                 owner: senderId
                             });
@@ -1034,8 +1238,8 @@
                             const color = this.#readColor(bytes, state);
                             const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
                             const lineWidth = this.#readULEB128(bytes, state);
-                            const lineLifeMs = this.#readULEB128(bytes, state);
-                            const lineFadeMs = this.#readULEB128(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
                             const xu = this.#readUint16(bytes, state);
                             const yu = this.#readUint16(bytes, state);
                             const entry = {
@@ -1044,8 +1248,8 @@
                                 color,
                                 transparency,
                                 lineWidth,
-                                lineLifeMs: lineLifeMs,
-                                lineFadeMs: lineFadeMs
+                                lifeMs,
+                                fadeMs
                             };
                             if (senderId) this.#chains.set(senderId, entry);
                             break;
@@ -1075,8 +1279,8 @@
                                             color: "#000000",
                                             transparency: 1,
                                             lineWidth: 3,
-                                            lineLifeMs: 5000,
-                                            lineFadeMs: 3000
+                                            lifeMs: 5000,
+                                            fadeMs: 3000
                                         };
                                         this.#chains.set(senderId, chain);
                                         continue;
@@ -1095,8 +1299,8 @@
                                         color: chain.color,
                                         transparency: chain.transparency,
                                         lineWidth: chain.lineWidth,
-                                        lineLifeMs: chain.lineLifeMs,
-                                        lineFadeMs: chain.lineFadeMs,
+                                        lifeMs: chain.lifeMs,
+                                        fadeMs: chain.fadeMs,
                                         uuid: uuid >>> 0,
                                         owner: senderId
                                     });
@@ -1106,6 +1310,37 @@
                                 }
                                 this.#chains.set(senderId, chain);
                             }
+                            break;
+                        }
+                        case 5: {
+                            const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const x1u = this.#readUint16(bytes, state);
+                            const y1u = this.#readUint16(bytes, state);
+                            const x2u = this.#readUint16(bytes, state);
+                            const y2u = this.#readUint16(bytes, state);
+                            const x3u = this.#readUint16(bytes, state);
+                            const y3u = this.#readUint16(bytes, state);
+                            const uuid = this.#readUint32(bytes, state);
+
+                            const x1 = Math.clamp(0, x1u / 65535, 1);
+                            const y1 = Math.clamp(0, y1u / 65535, 1);
+                            const x2 = Math.clamp(0, x2u / 65535, 1);
+                            const y2 = Math.clamp(0, y2u / 65535, 1);
+                            const x3 = Math.clamp(0, x3u / 65535, 1);
+                            const y3 = Math.clamp(0, y3u / 65535, 1);
+
+                            this.renderTriangle({
+                                x1, y1, x2, y2, x3, y3,
+                                color,
+                                transparency,
+                                lifeMs: lifeMs,
+                                fadeMs: fadeMs,
+                                uuid: uuid >>> 0,
+                                owner: senderId
+                            });
                             break;
                         }
                         default: {
