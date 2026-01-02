@@ -53,13 +53,13 @@
     uuids provided
  
     ### OP 2: Quick line
-    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
+    - <uint8 op> <uint24 color> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x1> <uint16 y1> <uint16 x2> <uint16 y2> <uint32 uuid>
     1. Tells clients to draw a line from
     (x1, y1) to (x2, y2) with options and
     provides a line uuid
  
     ### OP 3: Start chain
-    - <uint8 op> <uint24 color> <uint8 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
+    - <uint8 op> <uint24 color> <uleb128 lineWidth> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y>
     1. Tells clients to set a point at
     (x, y) to start a chain of lines with
     options
@@ -478,7 +478,7 @@
             const bytes = [];
             this.#writeUint8(bytes, 2);
             this.#writeColor(bytes, colorHex);
-            this.#writeUint8(bytes, lineWidth & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
             this.#writeUint16(bytes, x1 & 0xFFFF);
@@ -493,7 +493,7 @@
             const bytes = [];
             this.#writeUint8(bytes, 3);
             this.#writeColor(bytes, colorHex);
-            this.#writeUint8(bytes, lineWidth & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineLifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineFadeMs)));
             this.#writeUint16(bytes, x & 0xFFFF);
@@ -955,7 +955,7 @@
                         }
                         case 2: {
                             const color = this.#readColor(bytes, state);
-                            const lineWidth = this.#readUint8(bytes, state);
+                            const lineWidth = this.#readULEB128(bytes, state);
                             const lineLifeMs = this.#readULEB128(bytes, state);
                             const lineFadeMs = this.#readULEB128(bytes, state);
                             const x1u = this.#readUint16(bytes, state);
@@ -982,7 +982,7 @@
                         }
                         case 3: {
                             const color = this.#readColor(bytes, state);
-                            const lineWidth = this.#readUint8(bytes, state);
+                            const lineWidth = this.#readULEB128(bytes, state);
                             const lineLifeMs = this.#readULEB128(bytes, state);
                             const lineFadeMs = this.#readULEB128(bytes, state);
                             const xu = this.#readUint16(bytes, state);
