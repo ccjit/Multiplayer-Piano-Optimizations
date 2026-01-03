@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.4.1
+// @version      2.4.2
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -860,7 +860,7 @@
                 const shape = this.#shapeBuffer[i];
                 const timestamp = shape.timestamp || 0;
                 const age = now - timestamp;
-                if (age < (shape.lifeMs + shape.fadeMs) && !this.#drawingMutes.includes(shape.owner)) {
+                if (age < (shape.lifeMs + shape.fadeMs)) {
                     kept.push(shape);
                 }
             }
@@ -869,6 +869,8 @@
 
             for (let i = 0; i < this.#shapeBuffer.length; i++) {
                 const shape = this.#shapeBuffer[i];
+                if (this.#drawingMutes.includes(shape.owner)) continue; // user could unhide if they want to see it back
+
                 const timestamp = shape.timestamp;
                 const lifeMs = shape.lifeMs;
                 const fadeMs = shape.fadeMs;
