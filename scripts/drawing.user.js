@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.5.0
+// @version      2.5.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -1574,7 +1574,8 @@
                 lifeMs,
                 fadeMs,
                 options,
-                uuid
+                uuid,
+                owner: MPP?.client?.participantId || null
             });
 
             const xu = Math.round(nx * 65535) >>> 0;
