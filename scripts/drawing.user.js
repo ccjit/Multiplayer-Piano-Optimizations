@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.4.2
+// @version      2.5.0
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -48,7 +48,7 @@
     shapes
 
     ### OP 1: Clear shapes
-    - <uint8 op> <uleb128 length> <uint32 uuid>*
+    - <uint8 op> <uleb128 length*> <uint32 uuid>*
     1. Tells clients to clear shapes with
     uuids provided
 
@@ -65,7 +65,7 @@
     options
 
     ### OP 4: Continue chain
-    - <uint8 op> <uleb128 length> <<uint16 x> <uint16 y> <uint32 uuid>>*
+    - <uint8 op> <uleb128 length*> <<uint16 x> <uint16 y> <uint32 uuid>>*
     1. Tells clients to continue off of
     the user's chain to point (x, y) and
     provides a shape uuid
@@ -85,6 +85,26 @@
     - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 cx> <uint16 cy> <uint16 rx> <uint16 ry> <uint32 uuid>
     1. Tells clients to draw a filled ellipse
     at center (cx, cy) with radii (rx, ry)
+
+    ### OP 8: Text
+    - <uint8 op> <uint24 color> <uint8 transparency> <uleb128 fontSize> <uleb128 lifeMs> <uleb128 fadeMs> <uint16 x> <uint16 y> <string text> <bitfield8 options> <uint32 uuid>
+      <bitfield8 options>:
+        <uint2 align>:
+          0 - left
+          1 - right
+          2 - center
+          3 - [none]
+        <boolean styleBold>
+        <boolean styleItalic>
+        <boolean styleUnderline>
+        <boolean styleLineThrough> (strikethrough)
+        <uint2 font>:
+          0 - Verdana, DejaVu Sans, sans-serif (MPP)
+          1 - "Times New Roman", Times, Georgia, Garamond, serif
+          2 - "Lucida Console", "Courier New", Monaco, monospace
+          3 - "Brush Script MT", "Lucida Handwriting", cursive
+    1. Tells clients to draw a stroked text
+    area at (x, y) with options
 
     strings are prefixed with <uleb128 length>
     * Denotes multiple allowed
@@ -145,20 +165,42 @@
     Math.clamp = (min, x, max) => Math.min(max, Math.max(min, x));
 
     class Drawboard {
+        static TextAlign = {
+            LEFT: "left",
+            RIGHT: "right",
+            CENTER: "center"
+        };
+        static FontStyle = ["bold", "italic", "underline", "line-through"];
+        static FontFamily = {
+            SANS_SERIF: "Verdana, \"DejaVu Sans\", sans-serif",
+            SERIF: "\"Times New Roman\", Times, Georgia, Garamond, serif",
+            MONOSPACE: "\"Lucida Console\", \"Courier New\", Monaco, monospace",
+            CURSIVE: "\"Brush Script MT\", \"Lucida Handwriting\", cursive"
+        };
+
         #canvas;
         #ctx;
+        #offscreenCanvas;
+        #offscreenCtx;
+
         #enabled = true;
         #isShiftDown = false;
         #isCtrlDown = false;
         #clicking = false;
         #lastPosition;
         #position;
+
         #color = "#000000";
         #transparency = 1;
         #lineWidth = 3;
         #eraseFactor = 8;
         #lifeMs = 5000;
         #fadeMs = 3000;
+        #textAlign = Drawboard.TextAlign.LEFT;
+        #fontStyle = [];
+        #fontFamily = Drawboard.FontFamily.SANS_SERIF;
+        #fontSize = 12;
+
         #shapeBuffer = [];
         #opBuffer = [];
         #drawingMutes = [];
@@ -178,8 +220,13 @@
             this.#canvas.style.zIndex = "800";
             this.#canvas.style.pointerEvents = "none";
             document.documentElement.appendChild(this.#canvas);
-
             this.#ctx = this.#canvas.getContext("2d");
+
+            this.#offscreenCanvas = document.createElement("canvas");
+            this.#offscreenCanvas.width = 1;
+            this.#offscreenCanvas.height = 1;
+            this.#offscreenCtx = this.#offscreenCanvas.getContext("2d");
+
             this.#resize();
             this.#init();
         }
@@ -227,6 +274,18 @@
         get fadeMs() {
             return this.#fadeMs;
         }
+        get textAlign() {
+            return this.#textAlign;
+        }
+        get fontStyle() {
+            return this.#fontStyle;
+        }
+        get fontFamily() {
+            return this.#fontFamily;
+        }
+        get fontSize() {
+            return this.#fontSize;
+        }
         get mouseMoveThrottleMs() {
             return this.#mouseMoveThrottleMs;
         }
@@ -257,6 +316,20 @@
         }
         set fadeMs(fadeMs) {
             this.#fadeMs = fadeMs;
+        }
+        set textAlign(textAlign) {
+            if (!Object.values(Drawboard.TextAlign).includes(textAlign)) throw new Error("Invalid text align.");
+            this.#textAlign = textAlign;
+        }
+        set fontStyle(fontStyle) {
+            this.#fontStyle = fontStyle.filter(style => Drawboard.FontStyle.includes(style));
+        }
+        set fontFamily(fontFamily) {
+            if (!Object.values(Drawboard.FontFamily).includes(fontFamily)) throw new Error("Invalid font family.");
+            this.#fontFamily = fontFamily;
+        }
+        set fontSize(fontSize) {
+            this.#fontSize = fontSize;
         }
         set mouseMoveThrottleMs(mouseMoveThrottleMs) {
             this.#mouseMoveThrottleMs = mouseMoveThrottleMs;
@@ -471,7 +544,10 @@
             if (state.i + len > bytes.length) throw new Error("Unexpected end of payload (string).");
             const slice = bytes.slice(state.i, state.i + len);
             state.i += len;
-            return new Uint8Array(slice);
+            const textBytes = new Uint8Array(slice);
+            const text = new TextDecoder().decode(textBytes);
+
+            return text;
         }
         #writeString = (bytes, strOrBytes) => {
             if (strOrBytes instanceof Uint8Array) {
@@ -632,6 +708,22 @@
             return bytes;
         }
 
+        #buildTextPacket = (color, transparency, fontSize, lifeMs, fadeMs, x, y, text, options, uuid) => {
+            const bytes = [];
+            this.#writeUint8(bytes, 8);
+            this.#writeColor(bytes, color);
+            this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fontSize)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
+            this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeUint16(bytes, x & 0xFFFF);
+            this.#writeUint16(bytes, y & 0xFFFF);
+            this.#writeString(bytes, text);
+            this.#writeUint8(bytes, options & 0xFF);
+            this.#writeUint32(bytes, uuid >>> 0);
+            return bytes;
+        }
+
         #sendCustomData = (payload) => {
             if (!MPP?.client?.sendArray || !Drawboard.connected) return;
 
@@ -780,6 +872,22 @@
                             item.cyu,
                             item.rxu,
                             item.ryu,
+                            item.uuid >>> 0
+                        ));
+                        i++;
+                        break;
+                    }
+                    case 8: {
+                        builtOps.push(this.#buildTextPacket(
+                            item.color,
+                            item.transparency,
+                            item.fontSize,
+                            item.lifeMs,
+                            item.fadeMs,
+                            item.xu,
+                            item.yu,
+                            item.text,
+                            item.options,
                             item.uuid >>> 0
                         ));
                         i++;
@@ -934,6 +1042,74 @@
                         }
                         break;
                     }
+                    case "text": {
+                        this.#ctx.globalCompositeOperation = "source-over";
+
+                        const options = shape.options || 0;
+                        const align = options & 0x03;
+                        const bold = !!(options & 0x04);
+                        const italic = !!(options & 0x08);
+                        const underline = !!(options & 0x10);
+                        const lineThrough = !!(options & 0x20);
+                        const fontIndex = (options >> 6) & 0x03;
+
+                        const families = [
+                            Drawboard.FontFamily.SANS_SERIF,
+                            Drawboard.FontFamily.SERIF,
+                            Drawboard.FontFamily.MONOSPACE,
+                            Drawboard.FontFamily.CURSIVE
+                        ];
+                        const family = families[fontIndex] || Drawboard.FontFamily.SANS_SERIF;
+
+                        const style = (italic ? "italic " : "") + (bold ? "bold " : "");
+                        const fontSize = Math.max(1, Number(shape.fontSize) || 12);
+                        this.#ctx.font = `${style}${fontSize}px ${family}`;
+
+                        let textAlign = this.#textAlign;
+                        if (align === 0) textAlign = Drawboard.TextAlign.LEFT;
+                        else if (align === 1) textAlign = Drawboard.TextAlign.RIGHT;
+                        else if (align === 2) textAlign = Drawboard.TextAlign.CENTER;
+                        this.#ctx.textAlign = textAlign;
+                        this.#ctx.textBaseline = "top";
+
+                        const x = shape.x * this.#canvas.width;
+                        const y = shape.y * this.#canvas.height;
+                        this.#ctx.fillStyle = shape.color;
+                        this.#ctx.fillText(shape.text, x, y);
+
+                        const metrics = this.#ctx.measureText(shape.text || "");
+                        const textWidth = metrics.width || 0;
+
+                        if (underline) {
+                            const uy = y + fontSize;
+                            this.#ctx.beginPath();
+                            this.#ctx.lineWidth = Math.max(1, Math.floor(fontSize / 12) || 1);
+                            this.#ctx.strokeStyle = shape.color;
+                            let startX = x;
+
+                            if (textAlign === Drawboard.TextAlign.CENTER) startX = x - textWidth / 2;
+                            else if (textAlign === Drawboard.TextAlign.RIGHT) startX = x - textWidth;
+
+                            this.#ctx.moveTo(startX, uy);
+                            this.#ctx.lineTo(startX + textWidth, uy);
+                            this.#ctx.stroke();
+                        }
+                        if (lineThrough) {
+                            const ly = y + fontSize * 0.5;
+                            this.#ctx.beginPath();
+                            this.#ctx.lineWidth = Math.max(1, Math.floor(fontSize / 12) || 1);
+                            this.#ctx.strokeStyle = shape.color;
+                            let startX = x;
+
+                            if (textAlign === Drawboard.TextAlign.CENTER) startX = x - textWidth / 2;
+                            else if (textAlign === Drawboard.TextAlign.RIGHT) startX = x - textWidth;
+
+                            this.#ctx.moveTo(startX, ly);
+                            this.#ctx.lineTo(startX + textWidth, ly);
+                            this.#ctx.stroke();
+                        }
+                        break;
+                    }
                     default: {
                         console.warn("Unknown drawboard shape type:", shape.type);
                         break;
@@ -945,12 +1121,16 @@
             requestAnimationFrame(this.#draw);
         }
 
-        setLineSettings = ({ color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null } = {}) => {
+        setShapeSettings = ({ color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null, textAlign = null, fontStyle = null, fontFamily = null, fontSize = null } = {}) => {
             this.#color = color ?? this.#color;
             this.#transparency = transparency ?? this.#transparency;
             this.#lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
             this.#lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
             this.#fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
+            this.#textAlign = textAlign ? (Object.values(Drawboard.TextAlign).includes(textAlign) ? textAlign : this.#textAlign) : this.#textAlign;
+            this.#fontStyle = fontStyle ? fontStyle.filter(style => Drawboard.FontStyle.includes(style)) : this.#fontStyle;
+            this.#fontFamily = fontFamily ? (Object.values(Drawboard.FontFamily).includes(fontFamily) ? fontFamily : this.#fontFamily) : this.#fontFamily;
+            this.#fontSize = (Number.isFinite(fontSize) ? fontSize : this.#fontSize) >>> 0;
         }
 
         renderLine = ({ x1, y1, x2, y2, color, transparency, lineWidth, lifeMs, fadeMs, uuid = this.generateUUID(), owner = null } = {}) => {
@@ -1237,7 +1417,7 @@
             return results;
         }
 
-        renderEllipse = ({ cx, cy, rx, ry, color, transparency, lineWidth = 1, lifeMs, fadeMs, subType = "fill", uuid = this.generateUUID(), owner = null } = {}) => {
+        renderEllipse = ({ cx, cy, rx, ry, color, transparency, lineWidth, lifeMs, fadeMs, subType = "fill", uuid = this.generateUUID(), owner = null } = {}) => {
             const shape = {
                 type: "ellipse",
                 subType,
@@ -1343,6 +1523,80 @@
             return results;
         }
 
+        renderText = ({ x, y, text, color, transparency, fontSize, lifeMs, fadeMs, options, uuid = this.generateUUID(), owner = null } = {}) => {
+            const shape = {
+                type: "text",
+                x, y,
+                text: String(text),
+                color,
+                transparency: Math.clamp(0, transparency, 1),
+                fontSize,
+                lifeMs,
+                fadeMs,
+                options: options & 0xFF,
+                timestamp: Date.now(),
+                uuid: uuid >>> 0,
+                owner: owner || null
+            };
+            this.#shapeBuffer.push(shape);
+            return uuid >>> 0;
+        }
+
+        drawText = ({ x, y, text, color = null, transparency = null, fontSize = null, lineWidth = null, lifeMs = null, fadeMs = null, textAlign = null, fontStyle = [], fontFamily = null } = {}) => {
+            color = color ?? this.#color;
+            transparency = transparency ?? this.#transparency;
+            fontSize = (Number.isFinite(fontSize) ? fontSize : this.#fontSize) >>> 0;
+            lineWidth = (Number.isFinite(lineWidth) ? lineWidth : this.#lineWidth) >>> 0;
+            lifeMs = (Number.isFinite(lifeMs) ? lifeMs : this.#lifeMs) >>> 0;
+            fadeMs = (Number.isFinite(fadeMs) ? fadeMs : this.#fadeMs) >>> 0;
+
+            let options = 0;
+            options |= Object.values(Drawboard.TextAlign).indexOf(textAlign ?? Drawboard.TextAlign.LEFT) & 0x03;
+            options |= (fontStyle.includes("bold") ? 1 : 0) << 2;
+            options |= (fontStyle.includes("italic") ? 1 : 0) << 3;
+            options |= (fontStyle.includes("underline") ? 1 : 0) << 4;
+            options |= (fontStyle.includes("line-through") ? 1 : 0) << 5;
+            options |= (Object.values(Drawboard.FontFamily).indexOf(fontFamily ?? Drawboard.FontFamily.SANS_SERIF) & 0x03) << 6;
+
+            const nx = Math.clamp(0, Number(x) || 0, 1);
+            const ny = Math.clamp(0, Number(y) || 0, 1);
+
+            const uuid = this.generateUUID();
+
+            this.renderText({
+                x: nx,
+                y: ny,
+                text,
+                color,
+                transparency,
+                fontSize,
+                lineWidth,
+                lifeMs,
+                fadeMs,
+                options,
+                uuid
+            });
+
+            const xu = Math.round(nx * 65535) >>> 0;
+            const yu = Math.round(ny * 65535) >>> 0;
+
+            this.#pushOp({
+                op: 8,
+                color: color,
+                transparency: transparency,
+                fontSize: fontSize,
+                lifeMs: lifeMs,
+                fadeMs: fadeMs,
+                xu: xu & 0xFFFF,
+                yu: yu & 0xFFFF,
+                text: text,
+                options: options & 0xFF,
+                uuid: uuid >>> 0
+            });
+
+            return uuid >>> 0;
+        }
+
         renderErase = ({ x, y, radius } = {}) => {
             if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(radius)) return [];
             const removed = [];
@@ -1412,6 +1666,69 @@
                                 console.warn("Unknown drawboard shape subtype:", shape.subType);
                                 break;
                             }
+                        }
+                        break;
+                    }
+                    case "text": {
+                        const cx = x * this.#canvas.width;
+                        const cy = y * this.#canvas.height;
+                        const radiusPx = radius * Math.max(this.#canvas.width, this.#canvas.height);
+
+                        const opts = shape.options || 0;
+                        const align = opts & 0x03;
+                        const bold = !!(opts & 0x04);
+                        const italic = !!(opts & 0x08);
+                        // const underline = !!(opts & 0x10); // not needed for measurement
+                        // const lineThrough = !!(opts & 0x20);
+                        const fontIndex = (opts >> 6) & 0x03;
+
+                        const families = [
+                            Drawboard.FontFamily.SANS_SERIF,
+                            Drawboard.FontFamily.SERIF,
+                            Drawboard.FontFamily.MONOSPACE,
+                            Drawboard.FontFamily.CURSIVE
+                        ];
+                        const family = families[fontIndex] || Drawboard.FontFamily.SANS_SERIF;
+                        const style = (italic ? "italic " : "") + (bold ? "bold " : "");
+                        const fontSize = Math.max(1, Number(shape.fontSize) || this.#fontSize || 12);
+
+                        this.#ctx.save();
+                        this.#ctx.font = `${style}${fontSize}px ${family}`;
+                        this.#ctx.textBaseline = "top";
+
+                        const metrics = this.#ctx.measureText(shape.text || "");
+                        const textWidth = metrics.width || 0;
+
+                        let textHeight = fontSize;
+                        if (typeof metrics.actualBoundingBoxAscent === "number" && typeof metrics.actualBoundingBoxDescent === "number") {
+                            textHeight = metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent;
+                            if (!(Number.isFinite(textHeight)) || textHeight <= 0) textHeight = fontSize;
+                        }
+
+                        const px = shape.x * this.#canvas.width;
+                        const py = shape.y * this.#canvas.height;
+                        let startX = px;
+                        if (align === 1) startX = px - textWidth;
+                        else if (align === 2) startX = px - textWidth / 2;
+
+                        const rect = {
+                            x: startX,
+                            y: py,
+                            w: textWidth,
+                            h: textHeight
+                        };
+
+                        const nearestX = Math.max(rect.x, Math.min(cx, rect.x + rect.w));
+                        const nearestY = Math.max(rect.y, Math.min(cy, rect.y + rect.h));
+                        const dx = nearestX - cx;
+                        const dy = nearestY - cy;
+                        const distSq = dx * dx + dy * dy;
+
+                        this.#ctx.restore();
+
+                        if (distSq <= radiusPx * radiusPx) {
+                            if (shape.uuid) removed.push(shape.uuid);
+                            this.#shapeBuffer.splice(i, 1);
                         }
                         break;
                     }
@@ -1701,6 +2018,36 @@
                             });
                             break;
                         }
+                        case 8: {
+                            const color = this.#readColor(bytes, state);
+                            const transparency = Math.clamp(0, this.#readUint8(bytes, state) / 255, 1);
+                            const fontSize = this.#readULEB128(bytes, state);
+                            const lifeMs = this.#readULEB128(bytes, state);
+                            const fadeMs = this.#readULEB128(bytes, state);
+                            const xu = this.#readUint16(bytes, state);
+                            const yu = this.#readUint16(bytes, state);
+                            const text = this.#readString(bytes, state);
+                            const options = this.#readUint8(bytes, state);
+                            const uuid = this.#readUint32(bytes, state);
+
+                            const x = Math.clamp(0, xu / 65535, 1);
+                            const y = Math.clamp(0, yu / 65535, 1);
+
+                            this.renderText({
+                                x, y,
+                                text,
+                                color,
+                                transparency,
+                                fontSize,
+                                lineWidth: 1,
+                                lifeMs: lifeMs,
+                                fadeMs: fadeMs,
+                                options,
+                                uuid: uuid >>> 0,
+                                owner: senderId
+                            });
+                            break;
+                        }
                         default: {
                             console.warn("Unknown drawboard op code:", type);
                             break;
@@ -1714,6 +2061,7 @@
     }
 
     async function run() {
+        MPP.Drawboard = Drawboard;
         MPP.drawboard = new Drawboard();
 
         MPP.client.sendArray([{
