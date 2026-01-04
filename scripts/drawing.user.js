@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.5.1
+// @version      2.5.2
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -354,11 +354,11 @@
             window.addEventListener("resize", this.#resize);
             document.addEventListener("keydown", (e) => {
                 this.#isShiftDown = e.shiftKey;
-                this.#isCtrlDown = e.ctrlKey;
+                this.#isCtrlDown = e.ctrlKey || e.metaKey;
             });
             document.addEventListener("keyup", (e) => {
                 this.#isShiftDown = e.shiftKey;
-                this.#isCtrlDown = e.ctrlKey;
+                this.#isCtrlDown = e.ctrlKey || e.metaKey;
             });
             document.addEventListener("mousedown", (e) => {
                 this.#updatePosition();
