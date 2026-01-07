@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.7.1
+// @version      1.7.2
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -757,7 +757,7 @@
                             }
                         }
 
-                        const escPrefix = `(?<![\\w])${delim}([^\\s${delim}]*)$`;
+                        const escPrefix = `(?<!\\\\)${delim}([^\\s${delim}]*)$`;
                         const re = new RegExp(escPrefix);
                         const newBefore = before.replace(re, insertion);
 
@@ -811,8 +811,8 @@
                 }
             };
 
-            const beforeReNormal = /(?<![\\\w]):([^:\s]*)$/;
-            const beforeReOverlay = /(?<![\\\w]);([^;\s]*)$/;
+            const beforeReNormal = /(?<![\\]):([^:\s]*)$/;
+            const beforeReOverlay = /(?<![\\]);([^;\s]*)$/;
 
             input.addEventListener("input", () => {
                 const val = input.value;
