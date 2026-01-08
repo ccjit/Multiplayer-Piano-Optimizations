@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Emotes]
 // @namespace    https://tampermonkey.net/
-// @version      1.7.2
+// @version      1.7.3
 // @description  Display emoticons and colors in chat!
 // @author       zackiboiz, ccjit
 // @match        *://multiplayerpiano.com/*
@@ -233,11 +233,20 @@
                 const t = tokens[i];
                 if (t.type !== "overlay") continue;
                 let assignedTo = -1;
-                for (let j = i + 1; j < tokens.length; j++)
-                    if (tokens[j].type === "normal") { assignedTo = j; break; }
-                if (assignedTo === -1)
-                    for (let j = i - 1; j >= 0; j--)
-                        if (tokens[j].type === "normal") { assignedTo = j; break; }
+                for (let j = i + 1; j < tokens.length; j++) {
+                    if (tokens[j].type === "normal") {
+                        assignedTo = j;
+                        break;
+                    }
+                }
+                if (assignedTo === -1) {
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (tokens[j].type === "normal") {
+                            assignedTo = j;
+                            break;
+                        }
+                    }
+                }
                 if (assignedTo !== -1) {
                     assigned[assignedTo] = assigned[assignedTo] || [];
                     assigned[assignedTo].push({ name: t.name, pos: i });
@@ -489,6 +498,11 @@
                         const overlays = (assigned[i] || []).slice();
                         overlays.sort((a, b) => a.pos - b.pos);
 
+                        if (!this.emotes.hasOwnProperty(baseName)) {
+                            frag.appendChild(document.createTextNode(`:${baseName}:`));
+                            continue;
+                        }
+
                         const stack = document.createElement("span");
                         stack.className = "emote-stack";
                         if (overlays.length > 0) stack.classList.add("stacked");
@@ -501,18 +515,15 @@
                         baseImg.classList.add("base");
 
                         const overlayImgs = overlays.map(o => {
+                            if (!this.emotes.hasOwnProperty(o.name)) return null; // skip missing overlay
                             const img = this.#createEmoteImg(o.name, {
                                 isBase: false,
                                 overlayClass: true,
                                 stack
                             });
                             img.classList.add("overlay");
-
-                            return {
-                                img,
-                                name: o.name
-                            };
-                        });
+                            return { img, name: o.name };
+                        }).filter(Boolean);
 
                         stack.appendChild(baseImg);
                         for (const oi of overlayImgs) stack.appendChild(oi.img);
@@ -530,6 +541,11 @@
                         const key = `standalone-${i}`;
                         if (assigned[key] && assigned[key].length) {
                             for (const ov of assigned[key]) {
+                                if (!this.emotes.hasOwnProperty(ov.name)) {
+                                    frag.appendChild(document.createTextNode(`;${ov.name};`));
+                                    continue;
+                                }
+
                                 const wrapper = document.createElement("span");
                                 wrapper.className = "emote-stack";
                                 wrapper.title = `;${ov.name};`;
