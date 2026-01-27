@@ -396,5 +396,7 @@
     "ripbozo": "avif",
     "lidl": "avif",
     "flooshed": "avif",
-    "microwave": "avif" // overlay
+    "microwave": "avif", // overlay
+    "now": "avif",
+    "er": "avif"
 }
