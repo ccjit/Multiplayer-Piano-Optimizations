@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.6.1
+// @version      2.6.2
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -1351,8 +1351,8 @@
 
             return uuid >>> 0;
         }
-
-        drawLines = (segments = [], { color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null } = {}) => {
+        
+        drawLines = (segments = [], { color = null, transparency = null, lineWidth = null, lifeMs = null, fadeMs = null, chain = undefined } = {}) => {
             if (!Array.isArray(segments) || !segments.length) return [];
 
             const segs = segments.map(s => ({
@@ -1368,7 +1368,7 @@
             }));
 
             const eps = 1e-6;
-            const chainable = segs.length > 1 && (() => {
+            const autoChainable = segs.length > 1 && (() => {
                 for (let i = 0; i < segs.length - 1; i++) {
                     const a = segs[i], b = segs[i + 1];
                     if (Math.abs(a.x2 - b.x1) > eps || Math.abs(a.y2 - b.y1) > eps) return false;
@@ -1376,7 +1376,12 @@
                 return true;
             })();
 
-            if (chainable) {
+            // - if chain === true => force chaining
+            // - if chain === false => never chain
+            // - if chain === undefined => chain only when autoChainable
+            const useChain = chain === true ? true : (chain === false ? false : autoChainable);
+
+            if (useChain) {
                 const first = segs[0];
                 const xu = Math.round(first.x1 * 65535);
                 const yu = Math.round(first.y1 * 65535);
