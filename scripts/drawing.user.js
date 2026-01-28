@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Multiplayer Piano Optimizations [Drawing]
 // @namespace    https://tampermonkey.net/
-// @version      2.6.0
+// @version      2.6.1
 // @description  Draw on the screen!
 // @author       zackiboiz
 // @match        *://*.multiplayerpiano.com/*
@@ -753,9 +753,10 @@
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lineWidth)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeULEB128(bytes, vertices.length);
             for (const v of vertices) {
-                this.#writeUint16(bytes, v.x & 0xFFFF);
-                this.#writeUint16(bytes, v.y & 0xFFFF);
+                this.#writeUint16(bytes, v.xu & 0xFFFF);
+                this.#writeUint16(bytes, v.yu & 0xFFFF);
             }
             this.#writeUint32(bytes, uuid >>> 0);
             return bytes;
@@ -763,14 +764,15 @@
 
         #buildPolygonFillPacket = (color, transparency, lifeMs, fadeMs, vertices, uuid) => {
             const bytes = [];
-            this.#writeUint8(bytes, 9);
+            this.#writeUint8(bytes, 10);
             this.#writeColor(bytes, color);
             this.#writeUint8(bytes, Math.floor(Math.clamp(0, transparency, 1) * 255) & 0xFF);
             this.#writeULEB128(bytes, Math.max(0, Math.floor(lifeMs)));
             this.#writeULEB128(bytes, Math.max(0, Math.floor(fadeMs)));
+            this.#writeULEB128(bytes, vertices.length);
             for (const v of vertices) {
-                this.#writeUint16(bytes, v.x & 0xFFFF);
-                this.#writeUint16(bytes, v.y & 0xFFFF);
+                this.#writeUint16(bytes, v.xu & 0xFFFF);
+                this.#writeUint16(bytes, v.yu & 0xFFFF);
             }
             this.#writeUint32(bytes, uuid >>> 0);
             return bytes;
@@ -2326,17 +2328,17 @@
                             const lifeMs = this.#readULEB128(bytes, state);
                             const fadeMs = this.#readULEB128(bytes, state);
                             const len = this.#readULEB128(bytes, state);
-                            const uuid = this.#readUint32(bytes, state);
 
                             const vertices = [];
                             for (let i = 0; i < len; i++) {
                                 const xu = this.#readUint16(bytes, state);
                                 const yu = this.#readUint16(bytes, state);
-                                const x = xu >>> 0;
-                                const y = yu >>> 0;
+                                const x = Math.clamp(0, xu / 65535, 1);
+                                const y = Math.clamp(0, yu / 65535, 1);
 
                                 vertices.push({ x, y });
                             }
+                            const uuid = this.#readUint32(bytes, state);
 
                             this.renderPolygon({
                                 vertices,
@@ -2357,17 +2359,17 @@
                             const lifeMs = this.#readULEB128(bytes, state);
                             const fadeMs = this.#readULEB128(bytes, state);
                             const len = this.#readULEB128(bytes, state);
-                            const uuid = this.#readUint32(bytes, state);
 
                             const vertices = [];
                             for (let i = 0; i < len; i++) {
                                 const xu = this.#readUint16(bytes, state);
                                 const yu = this.#readUint16(bytes, state);
-                                const x = xu >>> 0;
-                                const y = yu >>> 0;
+                                const x = Math.clamp(0, xu / 65535, 1);
+                                const y = Math.clamp(0, yu / 65535, 1);
 
                                 vertices.push({ x, y });
                             }
+                            const uuid = this.#readUint32(bytes, state);
 
                             this.renderPolygon({
                                 vertices,
