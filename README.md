@@ -39,3 +39,4 @@
   - Triangle
   - Text
 - Also found on [Greasy Fork](https://greasyfork.org/en/scripts/561021)
+- Node.JS module found in [`modules/`](https://github.com/ZackiBoiz/Multiplayer-Piano-Optimizations/blob/main/modules/Drawing.js)
