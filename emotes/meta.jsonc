@@ -404,5 +404,9 @@
     "noidontthinkso": "avif",
     "trynottolaugh": "avif",
     "aldi": "avif",
-    "cooked": "avif"
+    "cooked": "avif",
+    "spongebobwatchingtv": "avif", // overlay
+    "popcorn": "avif",
+    "olo": "avif",
+    "ppcorn": "avif"
 }
