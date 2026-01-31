@@ -268,7 +268,9 @@
     "susge": "avif",
     "monkaw": "avif",
     "listening": "avif",
+    "lemon": "avif",
     "melon": "avif",
+    "cookie": "avif",
     "p": "avif",
     "toist": "avif",
     "ehehe": "avif",
@@ -399,5 +401,8 @@
     "microwave": "avif", // overlay
     "now": "avif",
     "er": "avif",
-    "noidontthinkso": "avif"
+    "noidontthinkso": "avif",
+    "trynottolaugh": "avif",
+    "aldi": "avif",
+    "cooked": "avif"
 }
