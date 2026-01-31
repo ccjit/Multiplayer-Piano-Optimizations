@@ -60,7 +60,6 @@
     "copium": "webp",
     "thevoices": "webp",
     "catlaugh": "webp",
-    "glorp": "webp",
     "bedge": "webp",
     "what": "webp",
     "schizo": "webp",
@@ -408,5 +407,14 @@
     "spongebobwatchingtv": "avif", // overlay
     "popcorn": "avif",
     "olo": "avif",
-    "ppcorn": "avif"
+    "ppcorn": "avif",
+    "lorp": "avif",
+    "rlorp": "avif",
+    "olorp": "avif",
+    "ylorp": "avif",
+    "glorp": "avif",
+    "clorp": "avif",
+    "blorp": "avif",
+    "vlorp": "avif",
+    "plorp": "avif"
 }
