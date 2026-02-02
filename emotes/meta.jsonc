@@ -434,5 +434,6 @@
     "wlorp": "png",
     "xlorp": "png",
     "ylorp": "png",
-    "zlorp": "png"
+    "zlorp": "png",
+    "skeletonpls": "avif"
 }
